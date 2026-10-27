@@ -83,16 +83,17 @@ final class SearchField: FlippedView, NSTextFieldDelegate {
         }
     }
     private func updateAccessory() {
-        let showClear = !indexing && !text.isEmpty
+        let showClear = !text.isEmpty
+        let showProgress = indexing && text.isEmpty
         if clearVisible != showClear { clearVisible = showClear; accessory(clear, visible: showClear) }
         clear.isEnabled = showClear
-        if progressVisible != indexing {
-            progressVisible = indexing
-            if indexing { progress.startAnimation(nil) }
-            accessory(progress, visible: indexing)
-            if !indexing {
+        if progressVisible != showProgress {
+            progressVisible = showProgress
+            if showProgress { progress.startAnimation(nil) }
+            accessory(progress, visible: showProgress)
+            if !showProgress {
                 DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.crossfade) { [weak self] in
-                    if self?.indexing == false { self?.progress.stopAnimation(nil) }
+                    if self?.progressVisible == false { self?.progress.stopAnimation(nil) }
                 }
             }
         }

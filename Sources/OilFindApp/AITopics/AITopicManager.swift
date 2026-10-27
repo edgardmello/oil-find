@@ -158,9 +158,10 @@ final class AITopicManager: ObservableObject {
             path == workbuddy + "/storage" || path == workbuddy + "/storage/skeleton" || path == workbuddy + "/storage/skeleton/account-snapshot.json" ||
             ["workbuddy.db", "workbuddy.db-wal"].contains(URL(fileURLWithPath: path).lastPathComponent) && URL(fileURLWithPath: path).deletingLastPathComponent().path == workbuddy }
         if provider == .claude { return path == claude || path == desktop || path.hasPrefix(desktop + "/") || path == claude + "/projects" || path.hasPrefix(claude + "/projects/") }
-        if path == codex { return true }
+        if path == codex { return false }
         guard path.hasPrefix(codex + "/") else { return false }
         let relative = String(path.dropFirst(codex.count + 1))
+        if relative.hasSuffix("-shm") { return false }
         return relative.hasPrefix("state_") || relative.hasPrefix("thread_history_") || relative.hasPrefix("sessions/") || relative.hasPrefix("archived_sessions/") || relative == "sessions" || relative == "archived_sessions"
     }
     private static func canonicalPath(_ path: String) -> String {
@@ -173,7 +174,7 @@ final class AITopicManager: ObservableObject {
     }
     private func codexDatabasePaths() -> [String] {
         let children = (try? FileManager.default.contentsOfDirectory(at: locations.codex, includingPropertiesForKeys: nil)) ?? []
-        var paths = [locations.codex.path]
+        var paths: [String] = []
         for url in children where (url.lastPathComponent.hasPrefix("state_") || url.lastPathComponent.hasPrefix("thread_history_")) && url.pathExtension == "sqlite" {
             paths.append(url.path); paths.append(url.path + "-wal")
         }
