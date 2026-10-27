@@ -85,7 +85,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         refreshAdditionalFilter()
         refreshProgress()
         supplementaryProvider?.sourcesDidChange(searchSources)
-        _ = generation.next(); results.cancelPendingRefresh(); results.cancelPress()
+        results.cancelPendingRefresh(); results.cancelPress()
         if supplementaryProvider?.isEnabled != true, let result = results.result, result.hasSupplements {
             let base = result.withoutSupplements()
             let row = results.selectedItem.flatMap { base.index(sourceID: $0.source.id, store: $0.source.store, id: $0.id, path: $0.path) } ?? 0
@@ -101,7 +101,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             }
         }
         results.localize()
-        startSearch(preserveSelection: true)
+        if view.window?.isVisible == true || snapshot {
+            refreshSearch()
+        }
     }
     var hidePanel: (() -> Void)?
     var onSettings: (() -> Void)?
@@ -232,7 +234,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
     func managerStateChanged(_ state: IndexManager.State) {
         refreshProgress()
-        if manager?.store == nil && !filters.additionalSelected && results.result?.hasAdditional != true { setState(.indexing) }
+        if manager?.store == nil && !filters.additionalSelected && results.result?.hasAdditional != true && results.result?.hasSupplements != true { setState(.indexing) }
     }
     private func refreshProgress() {
         if let result = results.result, result.query.isEmpty { updateFooter(result) }
@@ -326,7 +328,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             }
             let anchoredRow = anchor.flatMap { found.index(sourceID: $0.sourceID, store: $0.store, id: $0.id, path: $0.path) }
             let row = anchoredRow ?? 0
-            let deferNames = sources.isEmpty && additional != nil || previous?.query.raw == query.raw && ((refresh || preserveSelection) && previous?.hasAdditional == true || anchor != nil && anchoredRow == nil && supplementary != nil)
+            let deferNames = sources.isEmpty && additional != nil || previous?.query.raw == query.raw && ((refresh || preserveSelection) && (previous?.hasAdditional == true || previous?.hasSupplements == true) || anchor != nil && anchoredRow == nil && supplementary != nil)
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation.current(token) else { return }
                 self.diagnostics = query.diagnostics
