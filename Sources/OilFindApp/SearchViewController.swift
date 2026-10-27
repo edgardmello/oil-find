@@ -60,14 +60,13 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
     private func additionalChanged() {
         refreshAdditionalFilter()
-        _ = generation.next(); results.cancelPendingRefresh(); results.cancelPress()
         if additionalSearchProvider?.isEnabled != true { additionalPending = false }
         if let provider = additionalSearchProvider, let result = results.result,
            let filtered = result.removingUnavailableAdditionalItems(using: provider, options: filters.options) {
             results.refresh(filtered, applyingAvailabilityImmediately: true)
             resultDidChange(filtered)
         }
-        if view.window?.isVisible == true { startSearch(preserveSelection: true) }
+        if view.window?.isVisible == true { refreshSearch() }
     }
     func panelDidHide() {
         additionalSearchProvider?.visibilityChanged(false)
