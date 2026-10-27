@@ -107,7 +107,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let limited = request { startIndex(limited: limited) }
         panel.show(source: source)
     }
+    private func refreshFullDiskAccessState() {
+        guard limited, Permissions.hasFullDiskAccess() else { return }
+        limited = false
+        UserDefaults.standard.set(false, forKey: "skippedFullDiskAccess")
+        manager?.updateConfig(SettingsPreferences.indexConfig(limited: false))
+    }
+
     private func handleHotKey() {
+        refreshFullDiskAccessState()
         if welcomeState?.isShowing == true { finishWelcome(source: .hotkey) }
         else { panel.toggle(source: .hotkey) }
     }
@@ -210,6 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsController?.present()
     }
     func menuWillOpen(_ menu: NSMenu) {
+        refreshFullDiskAccessState()
         refreshExtensionMenu()
         refreshUpdateMenu()
         if let store = manager?.store { countItem?.title = L10n.text("menu.indexed", Presentation.countText(store.read { store.liveCount })) }
@@ -246,11 +255,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func checkUpdates() { UpdateManager.shared.check() }
     @objc private func presentUpdate() { UpdateManager.shared.present() }
     @objc private func showSearch() {
+        refreshFullDiskAccessState()
         if welcomeState?.isShowing == true { welcomeController?.present() }
         else { panel.show(source: .menu) }
     }
     @objc private func reopenRequested(_ notification: Notification) {
         AppLog.logger.info("reopen requested")
+        refreshFullDiskAccessState()
         if welcomeState?.isShowing == true { welcomeController?.present() }
         else { panel.show(source: .reopen) }
     }

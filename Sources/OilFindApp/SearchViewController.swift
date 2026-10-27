@@ -69,7 +69,10 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
         if view.window?.isVisible == true { startSearch(preserveSelection: true) }
     }
-    func panelDidHide() { additionalSearchProvider?.visibilityChanged(false) }
+    func panelDidHide() {
+        additionalSearchProvider?.visibilityChanged(false)
+        supplementaryProvider?.userActivity(visible: false, typing: false)
+    }
     private let additionalQueue = DispatchQueue(label: "com.oiloil.find.additional", qos: .userInitiated)
     private let supplementQueue = DispatchQueue(label: "com.oiloil.find.supplement", qos: .userInteractive)
     var additionalSources: (() -> [SearchSource])?
@@ -273,7 +276,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             provider.isEnabled && (filters.additionalSelected || options.kind == nil) ? provider.prepareSearch(query, isCancelled: cancelled) : nil
         }
         additionalSearchFailed = false
-        additionalPending = additional != nil
+        additionalPending = !refresh && additional != nil
         if sources.isEmpty && additional == nil {
             pendingNewSearch = nil
             results.clear(preservingViewport: true)
@@ -344,10 +347,11 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                     let files = box.hits.isEmpty ? found : found.supplement(box.hits, options: options)
                     let combined = files.including(additionalBox.items, options: options, elapsedMs: additionalBox.elapsedMs)
                     DispatchQueue.main.async { [weak self] in
-                        guard let self, self.generation.current(token), combined.isCurrent(self.searchSources) else { return }
+                        guard let self, self.generation.current(token) else { return }
                         self.pendingNewSearch = nil; self.additionalPending = false; self.additionalSearchFailed = additionalBox.failed
+                        self.refreshProgress()
+                        guard combined.isCurrent(self.searchSources) else { return }
                         if additionalBox.failed, previous?.query.raw == query.raw, previous?.hasAdditional == true {
-                            self.refreshProgress()
                             self.footer.warning = true; self.footer.text = self.additionalSearchProvider?.status ?? L10n.text("search.failed")
                             return
                         }
@@ -377,7 +381,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         configureEmpty(result); updateFooter(result)
     }
     private func configureEmpty(_ result: SearchPresentation) {
-        empty.configure(diagnostic: diagnostics.first, hasNoAccess: snapshotNoAccess || result.sources.contains { source in source.store.read { source.store.coverage[.noAccess].count > 0 } })
+        empty.configure(diagnostic: diagnostics.first, hasNoAccess: snapshotNoAccess || (!Permissions.hasFullDiskAccess() && result.sources.contains { source in source.store.read { source.store.coverage[.noAccess].count > 0 } }))
     }
     func toggleSyntax(_ show: Bool? = nil) {
         let visible = show ?? !syntaxVisible
