@@ -239,9 +239,6 @@ final class AITopicManager: ObservableObject {
                 let progress = {
                     if Date().timeIntervalSince(self.lastProgress) > 0.5 {
                         self.lastProgress = Date()
-                        DispatchQueue.main.async { [weak self] in
-                            guard let self, self.locked({ self.lifecycle == token }) else { return }; self.onChange?()
-                        }
                     }
                 }
                 // Publish visibility for every dirty source before spending time on any history.

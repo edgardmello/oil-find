@@ -18,7 +18,7 @@ if includesExtension {
     targets += [
         .target(name: "OilFindPro", dependencies: ["OilFindApp", "OilFindCore"], path: "Pro/Sources/OilFindPro",
                 resources: [.copy("Resources")]),
-        .testTarget(name: "OilFindProTests", dependencies: ["OilFindPro", "OilFindApp"], path: "Pro/Tests/OilFindProTests")
+        .testTarget(name: "OilFindProTests", dependencies: ["OilFindPro", "OilFindApp", "OilFindCore"], path: "Pro/Tests/OilFindProTests")
     ]
 }
 
