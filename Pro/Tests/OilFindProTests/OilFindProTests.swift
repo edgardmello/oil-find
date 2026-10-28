@@ -203,4 +203,31 @@ final class OilFindProTests: XCTestCase {
         XCTAssertFalse(hits.isEmpty, "Expected PDF and Markdown matches for 'supracitado'")
         XCTAssertTrue(matchedPaths.contains(where: { $0.hasSuffix(".pdf") }), "Expected at least one PDF match for 'supracitado'")
     }
+
+    func testTagSearchParsesAndExecutes() throws {
+        let query = Query.parse("tag:iptu", store: nil)
+        guard case .tag(let tagVal)? = query.clauses.first?.alternatives.first?.matcher else {
+            XCTFail("Expected tag matcher")
+            return
+        }
+        XCTAssertEqual(tagVal, "iptu")
+    }
+
+    func testRealIndexFindsTaggedFiles() throws {
+        let indexPath = NSHomeDirectory() + "/Library/Application Support/Oil Find/index.oilfind"
+        guard FileManager.default.fileExists(atPath: indexPath),
+              let store = IndexStore.load(from: indexPath) else {
+            return
+        }
+        store.write { store.buildHash() }
+        let manager = ContentSearchManager()
+        defer { manager.stop() }
+        let source = SearchSource(id: "startup", displayName: "", isOnline: true, store: store)
+        let query = Query.parse("tag:iptu", store: store)
+        let hits = manager.prepareSearch(query, options: SearchOptions(), sources: [source], isCancelled: { false })()
+        XCTAssertFalse(hits.isEmpty, "Expected tag hits for 'tag:iptu'")
+        if let first = hits.first {
+            XCTAssertTrue(first.detail.contains("🏷️ iptu"))
+        }
+    }
 }

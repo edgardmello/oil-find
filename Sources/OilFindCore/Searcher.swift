@@ -52,7 +52,7 @@ private struct DriverNeedle {
     var caseSensitive: Bool = false
 }
 private enum AtomTag: UInt8 {
-    case name, path, glob, regex, ext, kind, filesOnly, foldersOnly, fileName, folderName, size, modified
+    case name, path, glob, regex, ext, kind, filesOnly, foldersOnly, fileName, folderName, size, modified, tag
 }
 private struct ByteSpan {
     var bytes: UnsafePointer<UInt8>?
@@ -389,6 +389,7 @@ public enum Searcher {
                 case .folderName(let n): hot.tag = .folderName; hot.bytes = plan.bytes(n); hot.length = n.count; hot.ascii = n.allSatisfy { $0 < 128 }
                 case .size(let r): hot.tag = .size; hot.lower = r.lowerBound; hot.upper = r.upperBound
                 case .modified(let r): hot.tag = .modified; hot.lower = UInt64(r.lowerBound); hot.upper = UInt64(r.upperBound)
+                case .tag: hot.tag = .tag
                 }
                 plan.atoms.append(hot)
             }
@@ -804,6 +805,7 @@ public enum Searcher {
         case .foldersOnly: return AtomMatch(matched: store.kind[i] == 1, baseScore: 0, needleLength: 0)
         case .size: let size = store.size(id); return AtomMatch(matched: size >= atom.lower && size <= atom.upper, baseScore: 0, needleLength: 0)
         case .modified: let time = UInt64(store.mtime[i]); return AtomMatch(matched: time >= atom.lower && time <= atom.upper, baseScore: 0, needleLength: 0)
+        case .tag: return AtomMatch(matched: false, baseScore: 0, needleLength: 0)
         }
     }
     private static func matchNameHot(_ name: UnsafeBufferPointer<UInt8>, needle: UnsafeBufferPointer<UInt8>, cs: Bool, ascii: Bool, id: UInt32, pinyin: Bool, store: IndexStore, scratch: SearchScratch, scoreNeeded: Bool) -> (Bool, Int, Int) {

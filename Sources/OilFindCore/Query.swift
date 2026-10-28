@@ -175,6 +175,7 @@ public enum Matcher {
     case folderName([UInt8])
     case size(ClosedRange<UInt64>)
     case modified(ClosedRange<UInt32>)
+    case tag(String)
 }
 private func extKey(_ s: String) -> UInt64? {
     let b = Array(s.lowercased().utf8); guard (1...8).contains(b.count), b.allSatisfy({ $0 < 128 }) else { return nil }
@@ -197,6 +198,7 @@ private func parseMatcher(_ body: String, now: Date, home: String, diagnostic: i
         case "dm": if let range = parseDate(value, now: now) { return .modified(range) }; diagnostic = QueryDiagnostic(kind: .date)
         case "path": return .path(components: pathComponents(value.lowercased(), home: home))
         case "case": return .name(needle: Array(value.utf8), caseSensitive: true)
+        case "tag": return .tag(value.trimmingCharacters(in: .whitespaces))
         case "regex":
             do { return .regex(try NSRegularExpression(pattern: value), onPath: value.contains("/")) }
             catch { diagnostic = QueryDiagnostic(kind: .regex, value: value) }

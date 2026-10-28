@@ -19,6 +19,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     let results = ResultsView(frame: .zero)
     let footer = FooterBar(frame: .zero)
     let quickLook = QuickLook()
+    private var quickLookDismissTime: CFAbsoluteTime = 0
     private let topLine = SeparatorView(), bottomLine = SeparatorView()
     private let empty = StateView(.empty), indexing = StateView(.indexing)
     let syntax = SyntaxReference(frame: .zero)
@@ -153,6 +154,14 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         quickLook.selectedURL = { [weak self] in
             guard let self, self.results.selectedItem?.source.isOnline == true else { return nil }
             return self.selectedURL
+        }
+        quickLook.onWillClose = { [weak self] in
+            self?.quickLookDismissTime = CFAbsoluteTimeGetCurrent()
+        }
+        quickLook.onDidClose = { [weak self] in
+            guard let self, let window = self.view.window, window.isVisible else { return }
+            self.quickLookDismissTime = CFAbsoluteTimeGetCurrent()
+            window.makeKey()
         }
         quickLook.onKey = { [weak self] event in self?.handleKey(event) ?? false }
         footer.onSettings = { [weak self] in self?.onSettings?() }
@@ -605,11 +614,16 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     func menuWillOpen(_ menu: NSMenu) { menuTracking = true }
     func menuDidClose(_ menu: NSMenu) { menuTracking = false; hideIfInactive() }
     private func hideIfInactive() {
+        if CFAbsoluteTimeGetCurrent() - quickLookDismissTime < 0.4 { return }
         if view.window?.isKeyWindow == false && !quickLook.isVisible && !menuTracking && !dragging { hidePanel?() }
     }
     func windowDidResignKey(_ notification: Notification) {
         // Quick Look visibility settles after the key-window transition.
-        DispatchQueue.main.async { [weak self] in self?.hideIfInactive() }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.quickLook.isVisible || CFAbsoluteTimeGetCurrent() - self.quickLookDismissTime < 0.4 { return }
+            self.hideIfInactive()
+        }
     }
     func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
         (client as? NSTextField) === searchField.input ? searchField.editor : nil

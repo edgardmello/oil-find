@@ -31,7 +31,7 @@ final class ResultCell: NSTableCellView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         pathLabel.lineBreakMode = .byTruncatingMiddle
-        detailLabel.lineBreakMode = .byClipping
+        detailLabel.lineBreakMode = .byTruncatingTail
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.imageAlignment = .alignCenter
         icon.wantsLayer = true
@@ -45,9 +45,19 @@ final class ResultCell: NSTableCellView {
         icon.frame = NSRect(x: 26, y: 9, width: 32, height: 32)
         let width = max(0, bounds.width - 236)
         nameLabel.frame = NSRect(x: 70, y: 8, width: width, height: 18)
-        let detailWidth = detailLabel.isHidden ? 0 : ceil(detailLabel.attributedStringValue.size().width)
-        detailLabel.frame = NSRect(x: 70, y: 27, width: detailWidth, height: 15)
-        pathLabel.frame = NSRect(x: 70 + detailWidth, y: 27, width: max(0, width - detailWidth), height: 15)
+        if detailLabel.isHidden {
+            detailLabel.frame = .zero
+            pathLabel.frame = NSRect(x: 70, y: 27, width: width, height: 15)
+        } else {
+            let fullDetailWidth = ceil(detailLabel.attributedStringValue.size().width)
+            let maxDetail = max(100, width * 0.62)
+            let detailWidth = min(fullDetailWidth, maxDetail)
+            let spacing: CGFloat = 6
+            detailLabel.frame = NSRect(x: 70, y: 27, width: detailWidth, height: 15)
+            let pathX = 70 + detailWidth + spacing
+            let pathWidth = max(0, width - detailWidth - spacing)
+            pathLabel.frame = NSRect(x: pathX, y: 27, width: pathWidth, height: 15)
+        }
         dateLabel.frame = NSRect(x: bounds.width - 150, y: 9, width: 124, height: 16)
         sizeLabel.frame = NSRect(x: bounds.width - 150, y: 27, width: 124, height: 15)
     }
@@ -80,13 +90,16 @@ final class ResultCell: NSTableCellView {
         detailLabel.stringValue = ""
         if let detail = item.detail {
             let decoration = detail.presentation
-            let text = NSMutableAttributedString(string: decoration.text + " · ", attributes: [.font: detailLabel.font!, .foregroundColor: NSColor.secondaryLabelColor])
-            for range in decoration.highlights where NSMaxRange(range) <= text.length { text.addAttribute(.foregroundColor, value: NSColor.controlAccentColor, range: range) }
+            let text = NSMutableAttributedString(string: decoration.text, attributes: [.font: detailLabel.font!, .foregroundColor: NSColor.secondaryLabelColor])
+            for range in decoration.highlights where NSMaxRange(range) <= text.length {
+                text.addAttribute(.foregroundColor, value: NSColor.controlAccentColor, range: range)
+                text.addAttribute(.font, value: NSFont.systemFont(ofSize: 11.5, weight: .semibold), range: range)
+            }
             detailLabel.attributedStringValue = text
         }
         dateLabel.stringValue = Presentation.dateText(item.modified, now: Date(), calendar: .current, chinese: L10n.chinese)
         sizeLabel.stringValue = item.kind == 2 ? L10n.text("meta.app") : item.flags & SiftFlag.dir != 0 && item.flags & SiftFlag.package == 0 ? L10n.text("meta.folder") : Presentation.sizeText(item.size)
-        toolTip = item.path
+        toolTip = item.detail.map { "\(item.path)\n\n\($0.presentation.text)" } ?? item.path
         icon.image = icons.icon(name: item.name, path: item.path, flags: item.flags, kind: item.kind, resolveFileIcon: item.source.isOnline) { [weak self] image in
             guard let self, self.configuration == token, !self.displayingThumbnail else { return }
             self.icon.image = image

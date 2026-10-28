@@ -185,7 +185,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
         }
 
         let parsed = Self.decomposeQuery(query)
-        guard !parsed.hasFoldersOnly, !parsed.contentClauses.isEmpty else {
+        guard !parsed.hasFoldersOnly, (!parsed.contentClauses.isEmpty || !parsed.tagTerms.isEmpty) else {
             return { [] }
         }
 
@@ -205,11 +205,11 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
 
         let prefix = snippetPrefix()
         let flatTerms = parsed.contentClauses.flatMap { $0 }
-        // Require at least 3 characters (or non-ASCII such as CJK) before scanning file contents.
+        // Require at least 3 characters (or non-ASCII such as CJK) before scanning file contents, or valid tag terms.
         let hasSubstantialTerm = flatTerms.contains { term in
             term.text.count >= 3 || term.text.unicodeScalars.contains(where: { $0.value >= 128 })
         }
-        guard hasSubstantialTerm else {
+        guard hasSubstantialTerm || !parsed.tagTerms.isEmpty else {
             return { [] }
         }
 
@@ -229,11 +229,11 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
             var hits: [SupplementaryHit] = []
             var seenEntries: [String: Set<UInt32>] = [:]
 
-            // Phase 1: Query our lock-free SQLite FTS5 content index and macOS Spotlight (MDQuery) in parallel.
+            // Phase 1: Query our lock-free SQLite FTS5 content index, macOS Spotlight (MDQuery), and Finder Tags.
             var matchedBodiesByPath: [String: String] = [:]
             var spotlightPaths: [String] = []
 
-            if let db = self.database {
+            if let db = self.database, !parsed.contentClauses.isEmpty {
                 let dbMatches = db.search(
                     clauses: parsed.contentClauses,
                     excluded: parsed.excludedContentTerms,
@@ -256,10 +256,33 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
             }
             if isCancelled() { return [] }
 
-            var candidatePaths: [String] = Array(matchedBodiesByPath.keys)
-            var seenPathSet = Set(candidatePaths)
-            for path in spotlightPaths where seenPathSet.insert(path).inserted {
-                candidatePaths.append(path)
+            var tagMatchedPaths: [String] = []
+            var tagLabelsByPath: [String: String] = [:]
+            for tag in parsed.tagTerms {
+                if isCancelled() { return [] }
+                let paths = Self.querySpotlightTags(tag: tag, limit: 300, isCancelled: isCancelled)
+                for p in paths {
+                    tagMatchedPaths.append(p)
+                    tagLabelsByPath[p] = tag
+                }
+            }
+            if isCancelled() { return [] }
+
+            var candidatePaths: [String] = []
+            if !parsed.tagTerms.isEmpty {
+                if flatTerms.isEmpty {
+                    candidatePaths = tagMatchedPaths
+                } else {
+                    let tagSet = Set(tagMatchedPaths)
+                    let contentCandidates = Array(matchedBodiesByPath.keys) + spotlightPaths
+                    candidatePaths = contentCandidates.filter { tagSet.contains($0) }
+                }
+            } else {
+                candidatePaths = Array(matchedBodiesByPath.keys)
+                var seenPathSet = Set(candidatePaths)
+                for path in spotlightPaths where seenPathSet.insert(path).inserted {
+                    candidatePaths.append(path)
+                }
             }
 
             let flatAtoms = parsed.structuralClauses.flatMap { $0 }
@@ -294,18 +317,33 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                             ) != nil else { continue }
 
                             if seenEntries[source.id, default: []].insert(id).inserted {
-                                let knownBody = matchedBodiesByPath[path]
-                                localHits.append(
-                                    self.makeHit(
-                                        sourceID: source.id,
-                                        entryID: id,
-                                        sourceVersion: expectedVersion,
-                                        path: path,
-                                        knownBody: knownBody,
-                                        flatTerms: flatTerms,
-                                        prefix: prefix
+                                if let tagLabel = tagLabelsByPath[path], matchedBodiesByPath[path] == nil {
+                                    localHits.append(
+                                        SupplementaryHit(
+                                            sourceID: source.id,
+                                            entryID: id,
+                                            thumbnail: false,
+                                            sourceVersion: expectedVersion,
+                                            presentation: {
+                                                let label = "🏷️ " + tagLabel
+                                                return (label, [NSRange(location: 0, length: (label as NSString).length)])
+                                            }
+                                        )
                                     )
-                                )
+                                } else {
+                                    let knownBody = matchedBodiesByPath[path]
+                                    localHits.append(
+                                        self.makeHit(
+                                            sourceID: source.id,
+                                            entryID: id,
+                                            sourceVersion: expectedVersion,
+                                            path: path,
+                                            knownBody: knownBody,
+                                            flatTerms: flatTerms,
+                                            prefix: prefix
+                                        )
+                                    )
+                                }
                             }
                         }
                         return localHits
@@ -316,7 +354,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                 if isCancelled() { return [] }
 
                 // Phase 3: Fast bounded on-demand scan for unindexed files (e.g. newly created files or small stores).
-                let shouldScanOnDemand = store.count <= 25_000 || parsed.hasExplicitPathFilter || hits.count < 25
+                let shouldScanOnDemand = (store.count <= 25_000 || parsed.hasExplicitPathFilter || hits.count < 25) && !parsed.contentClauses.isEmpty
                 if shouldScanOnDemand {
                     let onDemandCandidates = Self.collectOnDemandCandidates(
                         in: store,
@@ -608,6 +646,65 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
         return paths
     }
 
+    private static func querySpotlightTags(
+        tag: String,
+        limit: Int = 300,
+        isCancelled: () -> Bool
+    ) -> [String] {
+        guard !tag.isEmpty, !isCancelled() else { return [] }
+        let cleanTag = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        let colorMap: [String: String] = [
+            "vermelho": "Red",
+            "laranja": "Orange",
+            "amarelo": "Yellow",
+            "verde": "Green",
+            "azul": "Blue",
+            "roxo": "Purple",
+            "cinza": "Gray"
+        ]
+        let queryTag = colorMap[cleanTag.lowercased()] ?? cleanTag
+        let escaped = queryTag
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "*", with: "")
+
+        let queryKey = "kMDItemUserTags == \"*\(escaped)*\"cd"
+        let cacheKey = "tag|\(limit)|\(queryKey)"
+        let now = CFAbsoluteTimeGetCurrent()
+        spotlightCacheLock.lock()
+        if let cached = spotlightCache[cacheKey], now - cached.timestamp <= 15.0 {
+            spotlightCacheLock.unlock()
+            return cached.paths
+        }
+        spotlightCacheLock.unlock()
+
+        let queryString = queryKey as CFString
+        guard let mdQuery = MDQueryCreate(kCFAllocatorDefault, queryString, [kMDItemPath] as CFArray, nil) else {
+            return []
+        }
+        MDQuerySetMaxCount(mdQuery, limit)
+        let ok = MDQueryExecute(mdQuery, CFOptionFlags(kMDQuerySynchronous.rawValue))
+        guard ok, !isCancelled() else { return [] }
+        let count = MDQueryGetResultCount(mdQuery)
+        var paths: [String] = []
+        if count > 0 {
+            paths.reserveCapacity(min(count, limit))
+            for i in 0..<min(count, limit) {
+                if isCancelled() { return [] }
+                guard let rawPtr = MDQueryGetResultAtIndex(mdQuery, i) else { continue }
+                let item = Unmanaged<MDItem>.fromOpaque(rawPtr).takeUnretainedValue()
+                if let path = MDItemCopyAttribute(item, kMDItemPath) as? String {
+                    paths.append(path.precomposedStringWithCanonicalMapping)
+                }
+            }
+        }
+        spotlightCacheLock.lock()
+        if spotlightCache.count >= 32 { spotlightCache.removeAll(keepingCapacity: true) }
+        spotlightCache[cacheKey] = (CFAbsoluteTimeGetCurrent(), paths)
+        spotlightCacheLock.unlock()
+        return paths
+    }
+
     private struct OnDemandCandidate {
         let id: UInt32
         let path: String
@@ -712,6 +809,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
     private struct DecomposedQuery {
         var contentClauses: [[ContentTerm]] = []
         var excludedContentTerms: [ContentTerm] = []
+        var tagTerms: [String] = []
         var structuralClauses: [[Atom]] = []
         var hasExplicitPathFilter = false
         var hasFoldersOnly = false
@@ -726,6 +824,22 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
             }) {
                 out.hasFoldersOnly = true
                 return out
+            }
+
+            var tagInClause: [String] = []
+            var isPureTagClause = !clause.alternatives.isEmpty
+            for atom in clause.alternatives {
+                if atom.negated { isPureTagClause = false; break }
+                if case .tag(let t) = atom.matcher, !t.isEmpty {
+                    tagInClause.append(t)
+                } else {
+                    isPureTagClause = false
+                    break
+                }
+            }
+            if isPureTagClause {
+                out.tagTerms.append(contentsOf: tagInClause)
+                continue
             }
 
             var terms: [ContentTerm] = []
