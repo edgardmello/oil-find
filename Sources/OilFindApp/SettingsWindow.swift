@@ -8,6 +8,7 @@ final class SettingsModel: ObservableObject {
     @Published private(set) var language: AppLanguage
     @Published var launchAtLogin: Bool
     let topics: AITopicManager
+    let fileContent: FileContentManager
     let update: UpdateManager
     private var languageObserver: NSObjectProtocol?
     private let languageDefaults: UserDefaults
@@ -48,8 +49,9 @@ final class SettingsModel: ObservableObject {
     private var keyMonitor: Any?
     private var timer: Timer?
 
-    init(snapshotStore: IndexStore? = nil, snapshot: Bool = false, languageDefaults: UserDefaults = .standard, preferences: UserDefaults = .standard, topics: AITopicManager? = nil) {
+    init(snapshotStore: IndexStore? = nil, snapshot: Bool = false, languageDefaults: UserDefaults = .standard, preferences: UserDefaults = .standard, topics: AITopicManager? = nil, fileContent: FileContentManager? = nil) {
         self.topics = topics ?? AITopicManager(defaults: preferences)
+        self.fileContent = fileContent ?? .shared
         self.snapshot = snapshot
         self.preferences = preferences
         self.languageDefaults = languageDefaults
@@ -361,6 +363,9 @@ private struct SettingsForm: View {
               footer: { hint(L10n.text("settings.scopeHint")) }
             Section(L10n.text("drivesTitle")) {
                 ExternalDriveSettings(catalog: externalDrives, chinese: L10n.chinese, window: window)
+            }
+            Section(L10n.text("contentTitle")) {
+                FileContentSettings(manager: model.fileContent)
             }
             Section(L10n.text("topicsTitle")) {
                 AITopicSettings(manager: model.topics)

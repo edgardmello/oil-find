@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let panel = SearchPanel()
     private let topics = AITopicManager()
     private lazy var topicSearch = AITopicSearchProvider(manager: topics)
+    private let fileContent = FileContentManager.shared
+    private lazy var fileContentSearch = FileContentSearchProvider(manager: fileContent)
     private var statusItem: NSStatusItem?
     private var statusMenu: NSMenu?
     private var settingsItem: NSMenuItem?, extensionItem: NSMenuItem?
@@ -56,9 +58,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let modifiers = (defaults.object(forKey: "hotKeyModifiers") as? NSNumber)?.uint32Value ?? UInt32(cmdKey | shiftKey)
         hotKey = HotKey(keyCode: key, modifiers: modifiers) { [weak self] in self?.handleHotKey() }
         buildMenu(keyCode: key, modifiers: modifiers)
-        panel.searchController.supplementaryProvider = appExtension?.supplementarySearchProvider
+        panel.searchController.supplementaryProvider = CompositeSupplementarySearchProvider([
+            appExtension?.supplementarySearchProvider,
+            fileContentSearch
+        ])
         panel.searchController.additionalSearchProvider = topicSearch
         topics.start()
+        fileContent.start()
         panel.searchController.additionalSources = { [weak self] in (self?.externalDrives.searchSources() ?? []) + (self?.appExtension?.searchSources() ?? []) }
         let sourcesChanged: () -> Void = { [weak self] in
             self?.panel.searchController.sourcesChanged()

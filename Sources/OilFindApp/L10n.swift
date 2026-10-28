@@ -43,6 +43,12 @@ enum L10n {
         }
     }
     private static let strings: [String: (String, String)] = [
+        "contentTitle": ("文件内容搜索", "File Content Search"),
+        "contentSearchEnabled": ("搜索文件内部文本", "Search text inside files"),
+        "contentSearchHint": ("在后台建立代码与文档的正文索引，快速检索文件内部内容。", "Indexes code and documents in the background to search text within files."),
+        "contentSemanticEnabled": ("启用原生语义联想", "Enable native semantic search"),
+        "contentIndexedCount": ("已索引 %@ 个文件", "%@ files indexed"),
+        "contentReindex": ("重新建立内容索引", "Rebuild Content Index"),
         "topicsPlaceholder": ("搜索 AI 话题与对话内容", "Search AI topics and conversations"),
         "topicsTitle": ("AI 话题", "AI Topics"),
         "topicsUntitled": ("未命名话题", "Untitled topic"),
