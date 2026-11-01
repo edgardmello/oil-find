@@ -33,7 +33,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private var timer: Timer?
     private var stateView: NSView?
     private var languageObserver: NSObjectProtocol?
-    private var menuTracking = false, dragging = false
+    private var menuTracking = false, dragging = false, footerShowsSelection = false
     private var trashing: Set<URL> = []
     private var selectionAnchor: (sourceID: String, store: IndexStore, id: UInt32, path: String)?
     private var additionalSearchFailed = false
@@ -143,6 +143,11 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             self?.footer.fileActions = self?.results.selectedAdditional == nil
             if let self, let item = self.results.selectedItem {
                 self.selectionAnchor = (item.source.id, item.source.store, item.id, item.path)
+            }
+            if let self, let result = self.results.result {
+                let multiple = self.multipleSelected
+                if multiple || self.footerShowsSelection { self.updateFooter(result) }
+                self.footerShowsSelection = multiple
             }
         }
         results.onContextMenu = { [weak self] _ in self?.contextMenu() }
@@ -424,6 +429,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         } else {
             footer.text = L10n.text(result.sortedCount < result.total ? "footer.partial" : "footer.results", Presentation.countText(result.total), Presentation.elapsedText(result.elapsedMs))
         }
+        if multipleSelected { footer.text = L10n.text("footer.selected", Presentation.countText(results.selectionCount)) }
     }
     func prepareSnapshot(state: String, query: String, options: SearchOptions, store: IndexStore?, selection: Int, additionalSources: [SearchSource] = [], additionalOnly: Bool = false) throws {
         _ = view
@@ -472,6 +478,14 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         guard stateView == nil else { return nil }
         return results.selectedItem.map { URL(fileURLWithPath: $0.path) }
     }
+    /// File results of the whole selection whose source is still online, focused row first.
+    private var selectedOnlineItems: [ResultItem] {
+        guard stateView == nil else { return [] }
+        return results.selectedItems.filter { item in
+            item.source.isOnline && (snapshot || searchSources.first { $0.id == item.source.id }.map { $0.isOnline && $0.store === item.source.store } == true)
+        }
+    }
+    private var multipleSelected: Bool { results.selectionCount > 1 && results.selectedAdditional == nil }
     func handleKey(_ event: NSEvent) -> Bool {
         if (view.window as? SearchPanel)?.hiding == true { return true }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -482,7 +496,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if flags.intersection([.command, .control, .option, .shift]) == .command,
            let editor = searchField.input.currentEditor() {
             switch key {
-            case "a": editor.selectAll(nil); return true
+            case "a" where !browsingResults: editor.selectAll(nil); return true
             case "c" where editor.selectedRange.length > 0: editor.copy(nil); return true
             case "x": editor.cut(nil); return true
             case "v": editor.paste(nil); return true
@@ -499,6 +513,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         switch event.keyCode {
         case 115: results.select(0, repeatKey: event.isARepeat); return true
         case 119: results.select((results.result?.count ?? 1) - 1, repeatKey: event.isARepeat); return true
+        case 126 where flags.contains(.shift) && !command: results.extend(-1, repeatKey: event.isARepeat); return true
+        case 125 where flags.contains(.shift) && !command: results.extend(1, repeatKey: event.isARepeat); return true
         case 126: if command { results.select(0, repeatKey: event.isARepeat) } else { results.move(-1, repeatKey: event.isARepeat) }; return true
         case 125: if command { results.select((results.result?.count ?? 1) - 1, repeatKey: event.isARepeat) } else { results.move(1, repeatKey: event.isARepeat) }; return true
         case 116: results.page(-1, repeatKey: event.isARepeat); return true
@@ -512,6 +528,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         guard command else { return false }
         switch key {
         case "y": previewSelected(); return true
+        case "a" where browsingResults: results.selectAll(); return true
         case "c":
             if option { copyName(); return true }
             if searchField.input.currentEditor()?.selectedRange.length ?? 0 > 0 { return false }
@@ -524,6 +541,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
     private func openSelected() {
         if let item = results.selectedAdditional { performAdditional(item, kind: .open); return }
+        if multipleSelected { openMultiple(); return }
         guard stateView == nil, (view.window as? SearchPanel)?.hiding != true, let url = selectedURL else { return }
         guard allowOnlineAction() else { return }
         guard FileManager.default.fileExists(atPath: url.path) else { NSSound.beep(); return }
@@ -533,7 +551,24 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             self?.hidePanel?()
         }
     }
-    private func revealSelected() { guard stateView == nil, let url = selectedURL, allowOnlineAction() else { return }; NSWorkspace.shared.activateFileViewerSelecting([url]); hidePanel?() }
+    private func openMultiple() {
+        guard (view.window as? SearchPanel)?.hiding != true else { return }
+        let urls = selectedOnlineItems.map { URL(fileURLWithPath: $0.path) }.filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !urls.isEmpty else { NSSound.beep(); return }
+        results.pressOpen { [weak self] in
+            var opened = false
+            for url in urls { opened = NSWorkspace.shared.open(url) || opened }
+            if opened { self?.hidePanel?() } else { NSSound.beep() }
+        }
+    }
+    private func revealSelected() {
+        if multipleSelected {
+            let urls = selectedOnlineItems.map { URL(fileURLWithPath: $0.path) }
+            guard !urls.isEmpty else { NSSound.beep(); return }
+            NSWorkspace.shared.activateFileViewerSelecting(urls); hidePanel?(); return
+        }
+        guard stateView == nil, let url = selectedURL, allowOnlineAction() else { return }; NSWorkspace.shared.activateFileViewerSelecting([url]); hidePanel?()
+    }
     @discardableResult
     private func allowOnlineAction() -> Bool {
         guard let item = results.selectedItem else { return false }
@@ -549,17 +584,31 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private func previewSelected() { if allowOnlineAction() { quickLook.toggle() } }
     private func copyPath() {
         if let item = results.selectedAdditional { performAdditional(item, kind: .copy); return }
+        if multipleSelected {
+            let urls = results.selectedItems.map { URL(fileURLWithPath: $0.path) }
+            guard stateView == nil, !urls.isEmpty else { return }
+            NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects(urls.map { $0 as NSURL })
+            NSPasteboard.general.setString(urls.map(\.path).joined(separator: "\n"), forType: .string)
+            footer.showToast(.copiedPath, value: L10n.text("selection.items", Presentation.countText(urls.count))); return
+        }
         guard stateView == nil, let url = selectedURL else { return }
         NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects([url as NSURL]); NSPasteboard.general.setString(url.path, forType: .string)
         footer.showToast(.copiedPath, value: url.path)
     }
     private func copyName() {
         if let item = results.selectedAdditional { performAdditional(item, kind: .copyName); return }
+        if multipleSelected {
+            let names = results.selectedItems.map(\.name)
+            guard stateView == nil, !names.isEmpty else { return }
+            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(names.joined(separator: "\n"), forType: .string)
+            footer.showToast(.copiedName, value: L10n.text("selection.items", Presentation.countText(names.count))); return
+        }
         guard stateView == nil, let item = results.selectedItem else { return }
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(item.name, forType: .string)
         footer.showToast(.copiedName, value: item.name)
     }
     private func trashSelected() {
+        if multipleSelected { trashMultiple(); return }
         guard stateView == nil, let url = selectedURL, let item = results.selectedItem else { return }
         guard allowOnlineAction(), FileManager.default.fileExists(atPath: url.path), trashing.insert(url).inserted else { return }
         NSWorkspace.shared.recycle([url]) { [weak self] _, error in
@@ -567,6 +616,19 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                 self?.trashing.remove(url)
                 if error != nil { NSSound.beep() }
                 else { self?.footer.showToast(.trashed, value: item.name) }
+            }
+        }
+    }
+    private func trashMultiple() {
+        let urls = selectedOnlineItems.map { URL(fileURLWithPath: $0.path) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) && !trashing.contains($0) }
+        guard !urls.isEmpty else { NSSound.beep(); return }
+        trashing.formUnion(urls)
+        NSWorkspace.shared.recycle(urls) { [weak self] moved, error in
+            DispatchQueue.main.async {
+                self?.trashing.subtract(urls)
+                if error != nil { NSSound.beep() }
+                if !moved.isEmpty { self?.footer.showToast(.trashed, value: L10n.text("selection.items", Presentation.countText(moved.count))) }
             }
         }
     }

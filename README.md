@@ -69,7 +69,7 @@ You can paste paths straight from a terminal or editor: `file://` URLs, quoted o
 | <kbd>Tab</kbd> / <kbd>⌘</kbd><kbd>1</kbd>…<kbd>9</kbd> | Switch kind |
 | <kbd>⌘</kbd><kbd>/</kbd> | Syntax reference |
 
-You can also drag results into other apps.
+You can also drag results into other apps. Select several results with ⇧-click, ⌘-click, ⇧↑ / ⇧↓, or ⌘A while browsing results, then drag them into a Finder folder to move them all at once (hold ⌥ to copy instead). Open, Show in Finder, Copy Path and Move to Trash act on the whole selection.
 
 ## Oil Find Pro
 
