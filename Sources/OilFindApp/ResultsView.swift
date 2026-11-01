@@ -14,7 +14,12 @@ private final class ResultRow: NSTableRowView {
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
     override var isEmphasized: Bool { get { true } set {} }
     override func drawBackground(in dirtyRect: NSRect) {}
-    override func drawSelection(in dirtyRect: NSRect) {}
+    // The animated selection plate marks the focused row; extra rows of a multiple selection draw their own tint.
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard let table = superview as? NSTableView, table.numberOfSelectedRows > 1 else { return }
+        NSColor.controlAccentColor.withAlphaComponent(Theme.dark(self) ? 0.22 : 0.11).setFill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 10, dy: 1), xRadius: 10, yRadius: 10).fill()
+    }
 }
 
 final class ResultCell: NSTableCellView {
@@ -170,7 +175,8 @@ private final class ResultTable: NSTableView {
         selectingWithPointer = true; defer { selectingWithPointer = false }
         onPointerSelection?()
         if row == selectedRow { onPointerReselection?() }
-        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        // Keep a multiple selection when the click lands inside it, as Finder does.
+        if !selectedRowIndexes.contains(row) { selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
         return contextMenu?(row)
     }
 }
@@ -211,6 +217,11 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
     private var pendingLocalization = false, pendingClear = false
     private var additionalSelectionID: String?
     private var selectionIdentity: (sourceID: String, store: IndexStore, id: UInt32, path: String)?
+    // Other rows of a multiple selection, restored after a reload; capped because each lookup scans the result.
+    private var extraSelectionIdentities: [(sourceID: String, store: IndexStore, id: UInt32, path: String)] = []
+    private static let restoredSelectionLimit = 100
+    // Keyboard extension keeps its own anchor and cursor because NSTableView.selectedRow is the last row added.
+    private var focusRow: Int?, extensionAnchor: Int?
     private var scrolling: Bool { liveScrolling || wheelScrolling || momentumScrolling }
     let icons = IconProvider()
     var result: SearchPresentation?
@@ -221,7 +232,17 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
     var onContextMenu: ((Int) -> NSMenu?)?
     var onDragging: ((Bool) -> Void)?
     var onRefreshApplied: ((SearchPresentation) -> Void)?
-    var selectedRow: Int { table.selectedRow }
+    var selectedRow: Int {
+        if let focusRow, table.selectedRowIndexes.contains(focusRow) { return focusRow }
+        return table.selectedRow
+    }
+    var selectionCount: Int { table.numberOfSelectedRows }
+    /// Every selected file result, focused row first, in result order otherwise.
+    var selectedItems: [ResultItem] {
+        let focused = selectedRow
+        let rows = [focused] + table.selectedRowIndexes.filter { $0 != focused }
+        return rows.compactMap { $0 >= 0 ? item(at: $0) : nil }
+    }
     var selectedID: UInt32? {
         guard let result, selectedRow >= 0 && selectedRow < result.count else { return nil }
         return result.row(selectedRow)?.id
@@ -235,12 +256,13 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
         table.style = .plain
         table.backgroundColor = .clear; table.headerView = nil; table.rowHeight = 50
         table.intercellSpacing = .zero; table.usesAutomaticRowHeights = false
-        table.selectionHighlightStyle = .regular; table.allowsMultipleSelection = false
+        table.selectionHighlightStyle = .regular; table.allowsMultipleSelection = true
         table.focusRingType = .none; table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("result")); column.resizingMask = .autoresizingMask
         table.addTableColumn(column); table.delegate = self; table.dataSource = self
         table.target = self; table.doubleAction = #selector(doubleClicked)
-        table.setDraggingSourceOperationMask(.copy, forLocal: false)
+        // Finder moves on the same volume, copies across volumes, copies with ⌥ and makes aliases with ⌥⌘.
+        table.setDraggingSourceOperationMask([.copy, .move, .link, .generic], forLocal: false)
         table.contextMenu = { [weak self] row in self?.onContextMenu?(row) }
         table.onPointerSelection = { [weak self] in self?.onPointerSelection?() }
         table.onPointerMove = { [weak self] in self?.recomputeHover() }
@@ -282,7 +304,7 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
         let origin = scroll.contentView.bounds.origin
         if preservingViewport { table.minimumDocumentHeight = max(table.minimumDocumentHeight, origin.y + scroll.contentView.bounds.height) }
         else { table.minimumDocumentHeight = 0 }
-        cancelPress(); result = nil; selectionIdentity = nil; additionalSelectionID = nil
+        cancelPress(); result = nil; selectionIdentity = nil; additionalSelectionID = nil; extraSelectionIdentities = []
         table.reloadData(); table.deselectAll(nil); updateSelection(animated: false); hideHover(immediately: true)
         if preservingViewport { scroll.contentView.scroll(to: origin); scroll.reflectScrolledClipView(scroll.contentView) }
     }
@@ -330,7 +352,12 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
             }
         case .reloadPreservingViewport:
             hideHover(immediately: true); table.reloadData()
+            let extras = extraSelectionIdentities
             setSelection(row, reveal: false)
+            let restored = IndexSet(extras.compactMap { result.index(sourceID: $0.sourceID, store: $0.store, id: $0.id, path: $0.path) })
+            if !restored.isEmpty, table.selectedRow >= 0 {
+                focusRow = table.selectedRow; table.selectRowIndexes(restored, byExtendingSelection: true)
+            }
             var rect = scroll.contentView.bounds; rect.origin = origin
             scroll.contentView.scroll(to: scroll.contentView.constrainBoundsRect(rect).origin)
             scroll.reflectScrolledClipView(scroll.contentView)
@@ -402,10 +429,30 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
         setSelection(row, reveal: true)
     }
     private func setSelection(_ row: Int, reveal: Bool) {
+        focusRow = nil; extensionAnchor = nil
         guard let result, result.count > 0 else { table.deselectAll(nil); return }
         let row = min(max(0, row), result.count - 1)
         table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         if reveal { table.scrollRowToVisible(row) }
+    }
+    /// Shift-arrow selection: grows or shrinks a contiguous range from the anchor to the moved cursor.
+    func extend(_ delta: Int, repeatKey: Bool = false) {
+        guard let result, result.count > 0 else { return }
+        let current = max(0, selectedRow)
+        let anchor = extensionAnchor.flatMap { table.selectedRowIndexes.contains($0) ? $0 : nil } ?? current
+        let cursor = min(max(0, current + delta), result.count - 1)
+        if !repeatKey && cursor == current { nudge(delta) }
+        repeating = repeatKey; defer { repeating = false }
+        extensionAnchor = anchor; focusRow = cursor
+        table.selectRowIndexes(IndexSet(integersIn: min(anchor, cursor)...max(anchor, cursor)), byExtendingSelection: false)
+        table.scrollRowToVisible(cursor)
+    }
+    /// Selects every file row (⌘A while browsing results).
+    func selectAll() {
+        guard let result, result.count > 0 else { return }
+        let focused = max(0, selectedRow)
+        focusRow = focused; extensionAnchor = nil
+        table.selectRowIndexes(IndexSet(integersIn: 0..<result.count), byExtendingSelection: false)
     }
     func move(_ delta: Int, repeatKey: Bool = false) {
         guard let result, result.count > 0 else { return }
@@ -469,9 +516,19 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
         if additionalSelectionID != nil { selectionIdentity = nil }
         else if let item = selectedItem { selectionIdentity = (item.source.id, item.source.store, item.id, item.path) }
         else if result?.count == 0 { selectionIdentity = nil }
+        let focused = selectedRow
+        extraSelectionIdentities = []
+        guard table.numberOfSelectedRows > 1 else { return }
+        for row in table.selectedRowIndexes where row != focused {
+            guard extraSelectionIdentities.count < Self.restoredSelectionLimit else { break }
+            if let item = item(at: row) { extraSelectionIdentities.append((sourceID: item.source.id, store: item.source.store, id: item.id, path: item.path)) }
+        }
     }
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard !refreshing else { return }
+        if table.selectingWithPointer { focusRow = nil; extensionAnchor = nil }
+        // Rows that stay selected still need to redraw when a selection becomes single or multiple.
+        table.enumerateAvailableRowViews { view, _ in view.needsDisplay = true }
         rememberSelection(); updateSelection(animated: !table.selectingWithPointer); recomputeHover(); onSelection?()
     }
     @objc private func doubleClicked() { if table.clickedRow >= 0 { onOpen?() } }
