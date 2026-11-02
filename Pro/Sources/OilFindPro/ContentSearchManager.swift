@@ -32,12 +32,18 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
     private var isPrimaryBusy = false
     private var stopped = false
     private var syncGeneration = 0
+    /// Store versions and settings of the last background sync that ran to completion.
+    /// Lets idle triggers (panel hidden, primary index settled) skip a full catalog walk when nothing changed.
+    private var lastCompletedSyncSignature: String?
     private var chinese = false
 
     private static let spotlightCacheLock = NSLock()
     private static var spotlightCache: [String: (timestamp: CFAbsoluteTime, paths: [String])] = [:]
 
-    private let indexQueue = DispatchQueue(label: "com.oiloil.find.pro.content.index", qos: .utility)
+    // Background QoS keeps extraction on efficiency cores and lets macOS throttle its disk I/O.
+    private let indexQueue = DispatchQueue(label: "com.oiloil.find.pro.content.index", qos: .background)
+    /// Coalesces bursts of sync triggers (state changes, panel hide, source updates) into one pass.
+    private static let syncDebounce: TimeInterval = 3
 
     public static var defaultDatabaseURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -113,6 +119,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
         syncGeneration += 1
         indexedMeta.removeAll()
         snippetCache.removeAll()
+        lastCompletedSyncSignature = nil
         lock.unlock()
         indexQueue.async { [weak self] in
             guard let self else { return }
@@ -904,7 +911,8 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
 
         guard !sources.isEmpty, database != nil else { return }
 
-        indexQueue.async { [weak self] in
+        // A newer trigger bumps the generation, so the delayed pass of an older one exits at once.
+        indexQueue.asyncAfter(deadline: .now() + Self.syncDebounce) { [weak self] in
             self?.runBackgroundSync(
                 generation: generation,
                 sources: sources,
@@ -942,40 +950,62 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
     ) {
         guard !shouldAbortSync(generation), let db = database else { return }
 
+        let signature = sources.map { source in
+            "\(source.id):\(ObjectIdentifier(source.store).hashValue):\(source.store.read { source.store.version })"
+        }.joined(separator: "|") + "|\(allowCode)\(allowDocs)\(allowNoise)"
+        lock.lock()
+        let unchanged = lastCompletedSyncSignature == signature
+        lock.unlock()
+        if unchanged { return }
+
+        let budget = ContentWorkBudget()
+        let cancelled = { [weak self] in self?.shouldAbortSync(generation) ?? true }
         var pendingWork: [(path: String, mtime: UInt32, size: UInt64, category: ContentExtractor.FileCategory)] = []
 
         for source in sources where source.isOnline {
             if shouldAbortSync(generation) { return }
             let store = source.store
-            let candidates: [(id: UInt32, mtime: UInt32, size: UInt64, category: ContentExtractor.FileCategory)] = store.read {
-                guard store.count > 1 else { return [] }
-                var list: [(id: UInt32, mtime: UInt32, size: UInt64, category: ContentExtractor.FileCategory)] = []
-                for rawID in 1..<store.count {
-                    let flags = store.flags[rawID]
-                    if flags & (SiftFlag.deleted | SiftFlag.dir | SiftFlag.symlink) != 0 { continue }
-                    if !allowNoise {
-                        if flags & SiftFlag.userArea == 0 { continue }
-                        if flags & (SiftFlag.noise | SiftFlag.inPackage | SiftFlag.hidden) != 0 { continue }
+            var candidates: [(id: UInt32, mtime: UInt32, size: UInt64, category: ContentExtractor.FileCategory)] = []
+            let total = store.read { store.count }
+            var chunkStart = 1
+            // Walk the catalog in chunks so the CPU budget can pause between them without holding the store's read lock.
+            while chunkStart < total {
+                if shouldAbortSync(generation) { return }
+                let chunkEnd = min(total, chunkStart + 32_768)
+                let chunk: [(id: UInt32, mtime: UInt32, size: UInt64, category: ContentExtractor.FileCategory)] = store.read {
+                    guard chunkStart < store.count else { return [] }
+                    var list: [(id: UInt32, mtime: UInt32, size: UInt64, category: ContentExtractor.FileCategory)] = []
+                    for rawID in chunkStart..<min(chunkEnd, store.count) {
+                        let flags = store.flags[rawID]
+                        if flags & (SiftFlag.deleted | SiftFlag.dir | SiftFlag.symlink) != 0 { continue }
+                        if !allowNoise {
+                            if flags & SiftFlag.userArea == 0 { continue }
+                            if flags & (SiftFlag.noise | SiftFlag.inPackage | SiftFlag.hidden) != 0 { continue }
+                        }
+                        let kind = store.kind[rawID]
+                        if kind != 3 && kind != 7 && kind != 0 { continue }
+                        let id = UInt32(rawID)
+                        let size = store.size(id)
+                        guard size > 0 else { continue }
+                        let name = store.name(id)
+                        guard let category = ContentExtractor.fileCategory(name: name, kind: kind, size: size) else {
+                            continue
+                        }
+                        if category.isDocument && !allowDocs { continue }
+                        if !category.isDocument && !allowCode { continue }
+                        list.append((id: id, mtime: store.mtime[rawID], size: size, category: category))
                     }
-                    let kind = store.kind[rawID]
-                    if kind != 3 && kind != 7 && kind != 0 { continue }
-                    let id = UInt32(rawID)
-                    let size = store.size(id)
-                    guard size > 0 else { continue }
-                    let name = store.name(id)
-                    guard let category = ContentExtractor.fileCategory(name: name, kind: kind, size: size) else {
-                        continue
-                    }
-                    if category.isDocument && !allowDocs { continue }
-                    if !category.isDocument && !allowCode { continue }
-                    list.append((id: id, mtime: store.mtime[rawID], size: size, category: category))
+                    return list
                 }
-                return list
+                candidates.append(contentsOf: chunk)
+                chunkStart = chunkEnd
+                budget.checkpoint(isCancelled: cancelled)
             }
 
             let sorted = candidates.sorted { $0.mtime > $1.mtime }
             for item in sorted.prefix(25_000) {
                 if shouldAbortSync(generation) { return }
+                budget.checkpoint(isCancelled: cancelled)
                 let path = store.read {
                     Int(item.id) < store.count && store.isLive(item.id) ? store.path(item.id) : ""
                 }
@@ -991,7 +1021,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
         }
 
         guard !pendingWork.isEmpty else {
-            refreshStatsOnMain()
+            markSyncCompleted(signature, generation: generation)
             return
         }
 
@@ -1004,11 +1034,16 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
         var batch: [(path: String, mtime: UInt32, size: UInt64, body: String)] = []
         batch.reserveCapacity(24)
 
+        var lastStats = ProcessInfo.processInfo.systemUptime
         for work in pendingWork {
-            guard waitWhileBusy(generation) else { return }
-            if let body = ContentExtractor.extractText(at: work.path, category: work.category) {
-                batch.append((path: work.path, mtime: work.mtime, size: work.size, body: body))
+            guard waitWhileBusy(generation) else {
+                if !batch.isEmpty { db.upsertBatch(batch) }
+                return
             }
+            // Files without extractable text (scanned PDFs, binaries, encrypted documents) are stored with an
+            // empty body, so they are not opened and parsed again on every launch.
+            let body = ContentExtractor.extractText(at: work.path, category: work.category) ?? ""
+            batch.append((path: work.path, mtime: work.mtime, size: work.size, body: body))
             lock.lock()
             indexedMeta[work.path] = (work.mtime, work.size)
             lock.unlock()
@@ -1016,14 +1051,22 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
             if batch.count >= 24 {
                 db.upsertBatch(batch)
                 batch.removeAll(keepingCapacity: true)
-                refreshStatsOnMain()
-                Thread.sleep(forTimeInterval: 0.025)
+                let now = ProcessInfo.processInfo.systemUptime
+                if now - lastStats >= 2 { lastStats = now; refreshStatsOnMain() }
             }
+            budget.checkpoint(isCancelled: cancelled)
         }
 
         if !batch.isEmpty {
             db.upsertBatch(batch)
         }
+        markSyncCompleted(signature, generation: generation)
+    }
+
+    private func markSyncCompleted(_ signature: String, generation: Int) {
+        lock.lock()
+        if syncGeneration == generation { lastCompletedSyncSignature = signature }
+        lock.unlock()
     }
 
     private func refreshStatsOnMain() {

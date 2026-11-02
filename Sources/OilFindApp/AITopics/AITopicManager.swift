@@ -119,7 +119,10 @@ final class AITopicManager: ObservableObject {
         }
         watcher = FSWatcher(paths: Array(Set(roots)), sinceWhen: FSWatcher.currentEventId(), latency: 0.15, queue: eventQueue) { [weak self] changes, rescan in
             guard let self else { return }
-            let changed = rescan ? providers : Set(providers.filter { provider in changes.contains { self.affectsTopics($0.path, provider: provider) } })
+            // Roots can fall back to a busy ancestor (for example ~/Library/Application Support) when a
+            // provider folder is missing, so resolve the locations once per batch, not per event and provider.
+            let roots = rescan ? nil : self.canonicalRoots()
+            let changed = rescan ? providers : Set(providers.filter { provider in changes.contains { self.affectsTopics($0.path, provider: provider, roots: roots!) } })
             guard !changed.isEmpty else { return }
             DispatchQueue.main.async { [weak self] in self?.databaseWatcher?.rescan(); self?.requestRefresh(providers: changed) }
         }
@@ -149,11 +152,17 @@ final class AITopicManager: ObservableObject {
         let changed = locked { let old = suspended; suspended = busy && !visible; return old != suspended }
         if changed && !busy { requestRefresh() }
     }
-    private func affectsTopics(_ path: String, provider: AITopicProvider) -> Bool {
+    private struct CanonicalRoots { let codex, claude, desktop, workbuddy: String; let prefixes: [String] }
+    private func canonicalRoots() -> CanonicalRoots {
+        let raw = [locations.codex.path, locations.claude.path, locations.claudeDesktop.path, locations.workbuddy.path]
+        let resolved = raw.map(Self.canonicalPath)
+        return CanonicalRoots(codex: resolved[0], claude: resolved[1], desktop: resolved[2], workbuddy: resolved[3], prefixes: Array(Set(raw + resolved)))
+    }
+    private func affectsTopics(_ path: String, provider: AITopicProvider, roots: CanonicalRoots) -> Bool {
+        let (codex, claude, desktop, workbuddy) = (roots.codex, roots.claude, roots.desktop, roots.workbuddy)
+        // Cheap rejection before touching the file system: unrelated paths cannot match any provider root.
+        guard roots.prefixes.contains(where: { path.hasPrefix($0) }) else { return false }
         let path = Self.canonicalPath(path)
-        let codex = Self.canonicalPath(locations.codex.path), claude = Self.canonicalPath(locations.claude.path)
-        let desktop = Self.canonicalPath(locations.claudeDesktop.path)
-        let workbuddy = Self.canonicalPath(locations.workbuddy.path)
         if provider == .workbuddy { return path == workbuddy || path == workbuddy + "/projects" || path.hasPrefix(workbuddy + "/projects/") ||
             path == workbuddy + "/storage" || path == workbuddy + "/storage/skeleton" || path == workbuddy + "/storage/skeleton/account-snapshot.json" ||
             ["workbuddy.db", "workbuddy.db-wal"].contains(URL(fileURLWithPath: path).lastPathComponent) && URL(fileURLWithPath: path).deletingLastPathComponent().path == workbuddy }
