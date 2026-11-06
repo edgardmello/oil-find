@@ -157,6 +157,45 @@ extension M26UITests {
         XCTAssertTrue(controller.quickLook.isVisible)
         controller.quickLook.close()
     }
+    func testQuickLookKeepsSearchFocusCaretAndIgnoresHeldKeys() throws {
+        let (root, store, _) = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+        let panel = SearchPanel(snapshot: true)
+        defer {
+            panel.searchController.quickLook.close()
+            QLPreviewPanel.shared().close()
+            panel.close()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            QLPreviewPanel.shared().orderOut(nil)
+        }
+        let controller = panel.searchController
+        try controller.prepareSnapshot(state: "results", query: "row", options: .init(sort: .name, ascending: true), store: store, selection: 0)
+        panel.makeKeyAndOrderFront(nil)
+        controller.quickLook.close()
+        controller.searchField.focus()
+        controller.searchField.editor.selectedRange = NSRange(location: 1, length: 0)
+        XCTAssertFalse(controller.browsingResults)
+        let commandY = key(16, characters: "y", flags: .command)
+        XCTAssertTrue(controller.handleKey(commandY))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertTrue(controller.quickLook.isVisible)
+        // The preview never takes over typing: the search field stays first responder.
+        XCTAssertTrue(panel.firstResponder === controller.searchField.editor)
+        let held = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: 0, context: nil,
+                                    characters: "y", charactersIgnoringModifiers: "y", isARepeat: true, keyCode: 16)!
+        XCTAssertTrue(controller.handleKey(held))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        XCTAssertTrue(controller.quickLook.isVisible)
+        // Space dismisses an open preview even while typing in the field.
+        XCTAssertTrue(controller.handleKey(key(49, characters: " ")))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertFalse(controller.quickLook.isVisible)
+        XCTAssertTrue(panel.isVisible)
+        XCTAssertTrue(panel.firstResponder === controller.searchField.editor)
+        XCTAssertEqual(controller.searchField.editor.selectedRange, NSRange(location: 1, length: 0))
+        XCTAssertEqual(controller.searchField.text, "row")
+        // With the preview closed, space types into the query again.
+        XCTAssertFalse(controller.handleKey(key(49, characters: " ")))
+    }
     func testExcludedTypesCommitNormalizationUndoRedoAndBlur() throws {
         _ = NSApplication.shared
         let suite = "OilFindM26Settings-" + UUID().uuidString

@@ -160,15 +160,17 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             guard let self, self.results.selectedItem?.source.isOnline == true else { return nil }
             return self.selectedURL
         }
+        quickLook.onWillOpen = { [weak self] in self?.rememberFocus() }
+        quickLook.onReclaimFocus = { [weak self] in self?.restoreFocus() }
         quickLook.onWillClose = { [weak self] in
             self?.quickLookDismissTime = CFAbsoluteTimeGetCurrent()
         }
         quickLook.onDidClose = { [weak self] in
             guard let self, let window = self.view.window, window.isVisible else { return }
             self.quickLookDismissTime = CFAbsoluteTimeGetCurrent()
-            window.makeKey()
+            self.restoreFocus()
         }
-        quickLook.onKey = { [weak self] event in self?.handleKey(event) ?? false }
+        quickLook.onKey = { [weak self] event in self?.forwardPreviewKey(event) ?? false }
         footer.onSettings = { [weak self] in self?.onSettings?() }
         languageObserver = NotificationCenter.default.addObserver(forName: L10n.changed, object: nil, queue: .main) { [weak self] _ in self?.localize() }
         setState(.indexing)
@@ -507,8 +509,11 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if syntaxVisible && event.keyCode == 53 { toggleSyntax(false); return true }
         if syntaxVisible { return false }
         if [126, 125, 116, 121, 115, 119].contains(event.keyCode) { setBrowsing(true) }
-        if event.keyCode == 49 && flags.intersection([.command, .control, .option, .shift]).isEmpty && browsingResults && previewWithSpace {
-            previewSelected(); return true
+        if event.keyCode == 49 && flags.intersection([.command, .control, .option, .shift]).isEmpty
+            && (quickLook.isVisible || (browsingResults && previewWithSpace)) {
+            // Space always dismisses an open preview; holding it must not flicker the panel.
+            if !event.isARepeat { previewSelected() }
+            return true
         }
         switch event.keyCode {
         case 115: results.select(0, repeatKey: event.isARepeat); return true
@@ -527,7 +532,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
         guard command else { return false }
         switch key {
-        case "y": previewSelected(); return true
+        case "y" where flags.intersection([.command, .control, .option, .shift]) == .command:
+            if !event.isARepeat { previewSelected() }
+            return true
         case "a" where browsingResults: results.selectAll(); return true
         case "c":
             if option { copyName(); return true }
@@ -581,7 +588,39 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
         return snapshot || current?.store === item.source.store
     }
-    private func previewSelected() { if allowOnlineAction() { quickLook.toggle() } }
+    private func previewSelected() {
+        if quickLook.isVisible { quickLook.close() } else if allowOnlineAction() { quickLook.open() }
+    }
+    /// Selection in the search field before the preview opened, restored when it closes.
+    private var focusSelection: NSRange?
+    private func rememberFocus() {
+        guard let window = view.window else { return }
+        focusSelection = window.firstResponder === searchField.editor ? searchField.editor.selectedRange : nil
+    }
+    /// Gives key status back to the search panel and puts the caret back where it was,
+    /// without selecting the whole query (which made the next keystroke replace it).
+    private func restoreFocus() {
+        guard let window = view.window, window.isVisible, (window as? SearchPanel)?.hiding != true else { return }
+        if !window.isKeyWindow { window.makeKey() }
+        if window.firstResponder === searchField.editor { focusSelection = nil; return }
+        let length = (searchField.text as NSString).length
+        let range = focusSelection ?? NSRange(location: length, length: 0)
+        focusSelection = nil
+        searchField.focus()
+        let location = min(range.location, length)
+        searchField.editor.selectedRange = NSRange(location: location, length: min(range.length, length - location))
+    }
+    /// Keys that reach the preview panel while it is key: take focus back and replay them
+    /// through the search panel, so navigation keeps working and typed text lands in the field.
+    private func forwardPreviewKey(_ event: NSEvent) -> Bool {
+        restoreFocus()
+        if handleKey(event) { return true }
+        guard view.window?.firstResponder === searchField.editor else { return false }
+        let flags = event.modifierFlags.intersection([.command, .control])
+        guard flags.isEmpty else { return false }
+        searchField.editor.keyDown(with: event)
+        return true
+    }
     private func copyPath() {
         if let item = results.selectedAdditional { performAdditional(item, kind: .copy); return }
         if multipleSelected {
