@@ -726,14 +726,15 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if flags.intersection([.command, .control, .option, .shift]) == [.control, .option],
            let slot = Int(key), (1...9).contains(slot), !event.isARepeat,
            applyQuickFilter(at: slot - 1) { return true }
-        let modifiers = flags.intersection([.command, .control, .option, .shift])
-        if key == "s", modifiers == [.control, .option] {
-            if !event.isARepeat { stashSelection() }
-            return true
-        }
-        if key == "s", modifiers == [.command, .shift] {
-            if !event.isARepeat { showStash() }
-            return true
+        if flags.contains(.command) || flags.contains(.control) {
+            if StashShortcut.add.chord(in: preferences).matches(event) {
+                if !event.isARepeat { stashSelection() }
+                return true
+            }
+            if StashShortcut.show.chord(in: preferences).matches(event) {
+                if !event.isARepeat { showStash() }
+                return true
+            }
         }
         // A nonactivating panel has no Edit menu to dispatch text shortcuts.
         if flags.intersection([.command, .control, .option, .shift]) == .command,
@@ -1022,8 +1023,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             menu.insertItem(openWith, at: 1)
         }
         if results.selectedItem != nil {
-            let stash = NSMenuItem(title: L10n.text("stash.add"), action: #selector(stashSelection), keyEquivalent: "s")
-            stash.keyEquivalentModifierMask = [.control, .option]
+            let stash = NSMenuItem(title: L10n.text("stash.add"), action: #selector(stashSelection), keyEquivalent: "")
+            StashShortcut.add.chord(in: preferences).apply(to: stash)
             stash.target = self
             stash.isEnabled = !selectedOnlineItems.isEmpty
             menu.insertItem(stash, at: max(0, menu.items.count - 1))

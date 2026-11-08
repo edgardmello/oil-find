@@ -24,7 +24,9 @@ final class SettingsModel: ObservableObject {
     @Published var indexPackageContents: Bool
     @Published var indexUserLibrary: Bool
     @Published var indexSystemDirs: Bool
+    @Published private(set) var stashShortcuts: [StashShortcut: StashShortcut.Chord]
     @Published var recording = false
+    private(set) var recordingStashShortcut: StashShortcut?
     @Published var shortcutError: String?
     @Published var coverage = CoverageStats()
     @Published var explanation: String?
@@ -40,6 +42,7 @@ final class SettingsModel: ObservableObject {
     private var inspectionGeneration = 0
     var onConfigChange: (() -> Void)?
     var onPinyinChange: (() -> Void)?
+    var onStashShortcutsChange: (() -> Void)?
     var suspendHotKey: (() -> Void)?
     var registerHotKey: ((UInt32, UInt32) -> Bool)?
     var onContentChange: (() -> Void)?
@@ -51,6 +54,9 @@ final class SettingsModel: ObservableObject {
         self.topics = topics ?? AITopicManager(defaults: preferences)
         self.snapshot = snapshot
         self.preferences = preferences
+        stashShortcuts = Dictionary(uniqueKeysWithValues: StashShortcut.allCases.map {
+            ($0, snapshot ? $0.defaultChord : $0.chord(in: preferences))
+        })
         self.languageDefaults = languageDefaults
         self.language = L10n.language
         launchAtLogin = snapshot ? false : SMAppService.mainApp.status == .enabled
@@ -188,8 +194,9 @@ final class SettingsModel: ObservableObject {
         onContentChange?()
     }
     func rebuild() { manager?.rescan(); rebuilding = manager != nil }
-    func beginRecording(in window: NSWindow?) {
+    func beginRecording(in window: NSWindow?, stashShortcut: StashShortcut? = nil) {
         guard !recording, let window else { return }
+        recordingStashShortcut = stashShortcut
         shortcutError = nil; recording = true; suspendHotKey?(); onContentChange?()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak window] event in
             guard let self, self.recording, let window, event.window === window else { return event }
@@ -197,6 +204,7 @@ final class SettingsModel: ObservableObject {
         }
     }
     private func endRecording() {
+        recordingStashShortcut = nil
         recording = false
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
         onContentChange?()
@@ -209,10 +217,26 @@ final class SettingsModel: ObservableObject {
     private func record(_ event: NSEvent) {
         if event.keyCode == UInt16(kVK_Escape) { cancelRecording(); return }
         let reset = event.keyCode == UInt16(kVK_Delete) || event.keyCode == UInt16(kVK_ForwardDelete)
-        let code = reset ? Shortcut.defaultKeyCode : UInt32(event.keyCode)
-        let mask = reset ? Shortcut.defaultModifiers : HotKey.carbonModifiers(event.modifierFlags)
+        let fallback = recordingStashShortcut?.defaultChord ?? .init(keyCode: Shortcut.defaultKeyCode, modifiers: Shortcut.defaultModifiers)
+        let code = reset ? fallback.keyCode : UInt32(event.keyCode)
+        let mask = reset ? fallback.modifiers : HotKey.carbonModifiers(event.modifierFlags)
         guard mask & UInt32(cmdKey | controlKey | optionKey) != 0 else {
             shortcutError = L10n.text("settings.shortcutModifier"); onContentChange?(); return
+        }
+        let chord = StashShortcut.Chord(keyCode: code, modifiers: mask)
+        if let target = recordingStashShortcut {
+            let global = StashShortcut.Chord(keyCode: keyCode, modifiers: modifiers)
+            guard target.canAssign(chord, in: preferences, global: global) else {
+                shortcutError = L10n.text("settings.stashShortcutUnavailable"); onContentChange?(); return
+            }
+            target.save(chord, in: preferences)
+            stashShortcuts[target] = chord
+            onStashShortcutsChange?()
+            cancelRecording()
+            return
+        }
+        if stashShortcuts.values.contains(chord) {
+            shortcutError = L10n.text("settings.stashShortcutUnavailable"); onContentChange?(); return
         }
         if registerHotKey?(code, mask) == true {
             keyCode = code; modifiers = mask
@@ -280,6 +304,14 @@ private struct SettingsForm: View {
                         Text(L10n.text("settings.shortcut")); Spacer()
                         ShortcutRecorder(model: model).frame(width: 120, height: 24)
                     }
+                    ForEach(StashShortcut.allCases, id: \.self) { target in
+                        HStack {
+                            Text(L10n.text(target == .add ? "settings.stashAddShortcut" : "settings.stashShowShortcut"))
+                            Spacer()
+                            ShortcutRecorder(model: model, stashShortcut: target).frame(width: 120, height: 24)
+                        }
+                    }
+                    hint(L10n.text("settings.stashShortcutHint"))
                     if let error = model.shortcutError { hint(error).foregroundStyle(.red) }
                 }
                 VStack(alignment: .leading, spacing: 5) {
@@ -401,15 +433,18 @@ private struct SettingsForm: View {
 
 private struct ShortcutRecorder: NSViewRepresentable {
     @ObservedObject var model: SettingsModel
+    var stashShortcut: StashShortcut? = nil
     func makeNSView(context: Context) -> RecorderButton {
         let button = RecorderButton()
-        button.onBegin = { [weak model, weak button] in model?.beginRecording(in: button?.window) }
+        button.onBegin = { [weak model, weak button] in model?.beginRecording(in: button?.window, stashShortcut: stashShortcut) }
         button.onCancel = { [weak model] in model?.cancelRecording() }
         return button
     }
     func updateNSView(_ button: RecorderButton, context: Context) {
-        button.recording = model.recording
-        button.title = model.recording ? L10n.text("settings.record") : Shortcut.symbols(keyCode: model.keyCode, modifiers: model.modifiers)
+        let chord = stashShortcut.map { model.stashShortcuts[$0] ?? $0.defaultChord }
+            ?? .init(keyCode: model.keyCode, modifiers: model.modifiers)
+        button.recording = model.recording && model.recordingStashShortcut == stashShortcut
+        button.title = button.recording ? L10n.text("settings.record") : Shortcut.symbols(keyCode: chord.keyCode, modifiers: chord.modifiers)
         button.needsDisplay = true
     }
 }
