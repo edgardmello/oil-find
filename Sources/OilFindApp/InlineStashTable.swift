@@ -119,6 +119,11 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
         }
     }
 
+    func revealAddedFiles(_ count: Int) {
+        guard count > 0, count <= files.count else { return }
+        table.scrollRowToVisible(files.count - count)
+    }
+
     private var selection: [StashedFile] { table.selectedRowIndexes.compactMap { files.indices.contains($0) ? files[$0] : nil } }
 
     func numberOfRows(in tableView: NSTableView) -> Int { files.count }

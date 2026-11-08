@@ -1298,8 +1298,14 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let urls = selectedOnlineItems.map { URL(fileURLWithPath: $0.path) }
         guard !urls.isEmpty else { return }
         fileStash.add(urls) { [weak self] count in
-            guard let self, self.view.window?.isVisible == true else { return }
+            guard let self else { return }
+            if count > 0 { self.stashExpanded = true }
+            guard self.view.window?.isVisible == true else { return }
             self.refreshAccessories()
+            if count > 0 {
+                self.view.layoutSubtreeIfNeeded()
+                self.accessories.revealAddedStashFiles(count)
+            }
             self.footer.warning = false
             self.footer.text = count > 0
                 ? L10n.text("stash.added", Presentation.countText(count))
