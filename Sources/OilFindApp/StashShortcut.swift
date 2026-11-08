@@ -3,7 +3,7 @@ import Carbon
 import OilFindCore
 
 enum StashShortcut: String, CaseIterable {
-    case add, show
+    case add, show, paste
 
     struct Chord: Equatable {
         let keyCode: UInt32
@@ -20,7 +20,19 @@ enum StashShortcut: String, CaseIterable {
     }
 
     var defaultChord: Chord {
-        Chord(keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(self == .add ? controlKey | optionKey : cmdKey | shiftKey))
+        switch self {
+        case .add: return Chord(keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(controlKey | optionKey))
+        case .show: return Chord(keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(cmdKey | shiftKey))
+        case .paste: return Chord(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(controlKey | optionKey))
+        }
+    }
+
+    var settingsTitle: String {
+        switch self {
+        case .add: return L10n.text("settings.stashAddShortcut")
+        case .show: return L10n.text("settings.stashShowShortcut")
+        case .paste: return L10n.text("filePaste.title")
+        }
     }
 
     private var preferenceKey: String { "stashShortcut." + rawValue }
