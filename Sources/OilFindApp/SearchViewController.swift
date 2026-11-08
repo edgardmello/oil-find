@@ -34,6 +34,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private let filePaste = FilePasteHandoff()
     private lazy var fileStash = FileStash(preferences: preferences)
     private lazy var scriptWindow = FileScriptWindow()
+    private let accessories = SearchAccessoryBar(frame: .zero)
+    private var stashExpanded = false
+    private var copyingStash = false
     private lazy var stashWindow = StashWindow(stash: fileStash)
     private let queue = DispatchQueue(label: "com.oiloil.find.search", qos: .userInteractive)
     private let coverageQueue = DispatchQueue(label: "com.oiloil.find.searchCoverage", qos: .utility)
@@ -138,7 +141,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     override func loadView() { view = PanelSurface(snapshot: snapshot) }
     override func viewDidLoad() {
         super.viewDidLoad()
-        [searchField, topLine, filters, results, empty, indexing, bottomLine, footer, inlinePreview, syntax].forEach(view.addSubview)
+        [searchField, topLine, filters, results, empty, indexing, bottomLine, footer, inlinePreview, accessories, syntax].forEach(view.addSubview)
         syntax.isHidden = true
         inlinePreview.isHidden = true
         syntax.onExample = { [weak self] example in
@@ -147,7 +150,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         searchField.onSelectionChange = { [weak self] in self?.refreshDiagnostics() }
         searchField.onChange = { [weak self] in self?.setBrowsing(false); self?.startSearch() }
         searchField.onKey = { [weak self] event in self?.handleKey(event) ?? false }
-        filters.onChange = { [weak self] in self?.refreshAdditionalFilter(); self?.searchField.focus(); self?.startSearch() }
+        filters.onChange = { [weak self] in self?.scopeChanged(resetAdditional: false) }
         filters.scopeMenu = { [weak self] in self?.makeScopeMenu() ?? NSMenu() }
         filters.onSortChange = { [weak self] in
             guard let self, !self.snapshot else { return }
@@ -197,6 +200,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
         quickLook.onKey = { [weak self] event in self?.forwardPreviewKey(event) ?? false }
         footer.onInlinePreview = { [weak self] in self?.toggleInlinePreview() }
+        footer.onActions = { [weak self] anchor in self?.showActions(anchoredTo: anchor) }
+        footer.onStash = { [weak self] in self?.toggleStash() }
         footer.onSettings = { [weak self] in self?.onSettings?() }
         languageObserver = NotificationCenter.default.addObserver(forName: L10n.changed, object: nil, queue: .main) { [weak self] _ in self?.localize() }
         setState(.indexing)
@@ -215,6 +220,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         footer.spacePreview = spaceOpensQuickLook
         filters.localize(); footer.localize(); empty.localize(); indexing.localize(); syntax.localize(); results.localize()
         searchField.localize(); inlinePreview.localize()
+        refreshAccessories()
         refreshAdditionalFilter()
         if let result = results.result { updateFooter(result) }
         else if stateView === indexing { footer.text = L10n.text("footer.indexing", Presentation.countText(indexing.count)) }
@@ -227,7 +233,10 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         searchField.frame = NSRect(x: 0, y: 0, width: w, height: 64)
         topLine.frame = NSRect(x: 0, y: 64, width: w, height: px)
         filters.frame = NSRect(x: 0, y: 64 + px, width: w, height: 40)
-        let top: CGFloat = 104 + px
+        let accessoryHeight = syntaxVisible ? 0 : accessories.desiredHeight
+        accessories.isHidden = syntaxVisible || accessoryHeight == 0
+        accessories.frame = NSRect(x: 0, y: 104 + px, width: w, height: accessoryHeight)
+        let top: CGFloat = 104 + px + accessoryHeight
         let region = NSRect(x: 0, y: top, width: w, height: max(0, h - top - 34 - px))
         let previewWidth = inlinePreviewVisible && !syntaxVisible ? min(400, floor(region.width * 0.36)) : 0
         let list = NSRect(x: 0, y: top, width: w - previewWidth, height: region.height)
@@ -306,14 +315,22 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let menu = NSMenu()
         let saved = QuickFilter.load(from: preferences)
         let remove = NSMenu()
+        let refine = NSMenu()
+        if !saved.isEmpty { menu.addItem(.sectionHeader(title: L10n.text("quickFilter.restore"))) }
         for (index, filter) in saved.enumerated() {
             let item = menu.addItem(withTitle: filter.name, action: #selector(applyQuickFilterItem(_:)), keyEquivalent: index < 9 ? String(index + 1) : "")
             item.keyEquivalentModifierMask = [.control, .option]
             item.target = self; item.tag = index
+            let refinement = refine.addItem(withTitle: filter.name, action: #selector(refineQuickFilterItem(_:)), keyEquivalent: "")
+            refinement.target = self; refinement.tag = index
             let deletion = remove.addItem(withTitle: filter.name, action: #selector(removeQuickFilter(_:)), keyEquivalent: "")
             deletion.target = self; deletion.tag = index
         }
-        if !saved.isEmpty { menu.addItem(.separator()) }
+        if !saved.isEmpty {
+            let item = menu.addItem(withTitle: L10n.text("quickFilter.refine"), action: nil, keyEquivalent: "")
+            item.submenu = refine
+            menu.addItem(.separator())
+        }
         let save = menu.addItem(withTitle: L10n.text("quickFilter.save"), action: #selector(saveQuickFilter), keyEquivalent: "")
         save.target = self
         if !saved.isEmpty {
@@ -332,11 +349,15 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         _ = applyQuickFilter(at: item.tag)
     }
 
-    private func applyQuickFilter(at index: Int) -> Bool {
+    @objc private func refineQuickFilterItem(_ item: NSMenuItem) {
+        _ = applyQuickFilter(at: item.tag, restoreQuery: false)
+    }
+
+    private func applyQuickFilter(at index: Int, restoreQuery: Bool = true) -> Bool {
         let saved = QuickFilter.load(from: preferences)
         guard saved.indices.contains(index) else { return false }
         let filter = saved[index]
-        searchField.text = filter.query
+        if restoreQuery { searchField.text = filter.query }
         folderScope = filter.folder
         volumeScope = filter.volume
         hiddenOnly = filter.hiddenOnly
@@ -396,16 +417,81 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         scopeChanged()
     }
 
-    private func scopeChanged() {
+    private func scopeChanged(resetAdditional: Bool = true) {
         filters.scopeActive = folderScope != nil || volumeScope != nil || hiddenOnly
-        if filters.additionalSelected { filters.select(0, notify: false) }
+        if resetAdditional && filters.additionalSelected { filters.select(0, notify: false) }
         refreshAdditionalFilter()
+        refreshAccessories()
         setBrowsing(false)
         searchField.focus()
         startSearch()
     }
 
+    private func refreshAccessories() {
+        var chips: [(String, () -> Void)] = []
+        if let kind = filters.options.kind, FilterBar.names.indices.contains(Int(kind)) {
+            chips.append((L10n.text("filter." + FilterBar.names[Int(kind)]) + " ×", { [weak self] in self?.filters.select(0) }))
+        }
+        if let volumeScope {
+            let title = scopedSources.first.map { $0.id == "startup" ? L10n.text("scope.startup") : $0.displayName } ?? volumeScope
+            chips.append((title + " ×", { [weak self] in self?.volumeScope = nil; self?.scopeChanged() }))
+        }
+        if let folderScope {
+            chips.append(((folderScope as NSString).lastPathComponent + " ×", { [weak self] in self?.clearFolderScope() }))
+        }
+        if hiddenOnly {
+            chips.append((L10n.text("scope.hiddenOnly") + " ×", { [weak self] in self?.toggleHiddenOnly() }))
+        }
+        if chips.count > 1 {
+            chips.append((L10n.text("panel.clearFilters"), { [weak self] in
+                guard let self else { return }
+                self.volumeScope = nil; self.folderScope = nil; self.hiddenOnly = false
+                self.filters.select(0, notify: false)
+                self.scopeChanged()
+            }))
+        }
+        accessories.setFilters(chips)
+        let files = snapshot ? [] : fileStash.files
+        footer.stashCount = files.count
+        accessories.setStash(files: Array(files.prefix(3)), total: files.count, expanded: stashExpanded,
+                             copy: { [weak self] in self?.copyStash() }, open: { [weak self] in self?.showStash() },
+                             remove: { [weak self] id in self?.fileStash.remove([id]); self?.refreshAccessories() })
+        accessories.needsLayout = true
+        view.needsLayout = true
+    }
+
+    private func toggleStash() {
+        if syntaxVisible { toggleSyntax(false) }
+        stashExpanded.toggle()
+        refreshAccessories()
+        restoreFocus()
+    }
+
+    private func copyStash() {
+        guard !copyingStash else { return }
+        let files = fileStash.files
+        guard !files.isEmpty else { return }
+        copyingStash = true
+        fileStash.resolve(files) { [weak self] urls in
+            guard let self else { return }
+            self.copyingStash = false
+            guard self.view.window?.isVisible == true else { return }
+            let ids = Set(self.fileStash.files.map(\.id))
+            let available = files.compactMap { ids.contains($0.id) ? urls[$0.id] : nil }
+            guard !available.isEmpty else {
+                self.footer.text = L10n.text("panel.stashUnavailable")
+                return
+            }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            if pasteboard.writeObjects(available.map { $0 as NSURL }) {
+                self.footer.text = L10n.text("panel.stashCopied", String(available.count), String(files.count))
+            }
+        }
+    }
+
     func panelWillShow() {
+        refreshAccessories()
         additionalSearchProvider?.visibilityChanged(true)
         setBrowsing(false)
         supplementaryProvider?.userActivity(visible: true, typing: false)
@@ -667,6 +753,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     func prepareSnapshot(state: String, query: String, options: SearchOptions, store: IndexStore?, selection: Int, additionalSources: [SearchSource] = [], additionalOnly: Bool = false) throws {
         _ = view
         searchField.text = state == "recent" ? "" : query; filters.options = options
+        refreshAccessories()
         if state == "indexing" {
             setState(.indexing); indexing.updateCount(1_234_567); searchField.indexing = true
             footer.text = L10n.text("footer.indexing", Presentation.countText(1_234_567)); return
@@ -745,9 +832,13 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                 return true
             }
             if StashShortcut.show.chord(in: preferences).matches(event) {
-                if !event.isARepeat { showStash() }
+                if !event.isARepeat { toggleStash() }
                 return true
             }
+        }
+        if flags.intersection([.command, .control, .option, .shift]) == .command, key == "k" {
+            if !event.isARepeat { showActions(anchoredTo: footer) }
+            return true
         }
         // A nonactivating panel has no Edit menu to dispatch text shortcuts.
         if flags.intersection([.command, .control, .option, .shift]) == .command,
@@ -1010,6 +1101,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     @objc private func additionalContextAction(_ sender: NSMenuItem) {
         guard let action = sender.representedObject as? AdditionalSearchAction else { return }; runAdditional(action)
     }
+    private func showActions(anchoredTo anchor: NSView) {
+        guard stateView == nil, !syntaxVisible, results.selectedItem != nil || results.selectedAdditional != nil else { return }
+        let menu = contextMenu()
+        menu.popUp(positioning: nil, at: NSPoint(x: anchor.bounds.midX, y: 0), in: anchor)
+    }
+
     private func contextMenu() -> NSMenu {
         let menu = NSMenu(); menu.delegate = self
         if let selected = results.selectedAdditional {
@@ -1056,6 +1153,26 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             exclude.target = self
             menu.insertItem(exclude, at: max(0, menu.items.count - 1))
         }
+        let items = menu.items.filter { !$0.isSeparatorItem }
+        menu.removeAllItems()
+        func group(_ key: String, where predicate: (NSMenuItem) -> Bool) {
+            let matching = items.filter(predicate)
+            guard !matching.isEmpty else { return }
+            if !menu.items.isEmpty { menu.addItem(.separator()) }
+            menu.addItem(.sectionHeader(title: L10n.text(key)))
+            matching.forEach(menu.addItem)
+        }
+        group("panel.actionsOpen") {
+            $0.action == #selector(chooseApplication) || $0.action == #selector(contextAction(_:)) && $0.tag <= 2
+        }
+        group("panel.actionsOrganize") {
+            $0.action == #selector(scopeToSelection) || $0.action == #selector(stashSelection) ||
+            $0.action == #selector(excludeSelected) || $0.action == #selector(contextAction(_:)) && $0.tag == 7
+        }
+        group("panel.actionsCopy") {
+            $0.action == #selector(pasteSelectionInPreviousApp) || $0.action == #selector(contextAction(_:)) && (4...5).contains($0.tag)
+        }
+        group("fileScripts.title") { $0.hasSubmenu }
         return menu
     }
     private func fileScriptsMenu() -> NSMenu? {
@@ -1122,6 +1239,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         guard !urls.isEmpty else { return }
         fileStash.add(urls) { [weak self] count in
             guard let self, self.view.window?.isVisible == true else { return }
+            self.refreshAccessories()
             self.footer.warning = false
             self.footer.text = count > 0
                 ? L10n.text("stash.added", Presentation.countText(count))

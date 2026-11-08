@@ -27,8 +27,22 @@ final class FooterBar: FlippedView {
     private var toastTimer: Timer?
     private var toastContent: (ToastKind, String)?
     private let status = Theme.label(11.5, .regular, .tertiaryLabelColor)
-    private let hints = [KeyHint("↩", L10n.text("hint.open")), KeyHint("⌘↩", L10n.text("hint.reveal")), KeyHint("⌘Y", L10n.text("hint.preview")), KeyHint("⌘C", L10n.text("hint.copy"))]
+    private let hints = [KeyHint("↩", L10n.text("hint.open")), KeyHint("⌘Y", L10n.text("hint.preview"))]
     private let settings = SettingsButton()
+    private let actions = ChromeButton("", style: .plain, size: 12, weight: .medium)
+    private let stash = ChromeButton("", style: .plain, size: 12, weight: .medium)
+    var onActions: ((NSView) -> Void)?
+    var onStash: (() -> Void)?
+    var stashCount = 0 { didSet { refreshButtons() } }
+
+    private func refreshButtons() {
+        actions.title = L10n.text("panel.actions")
+        stash.title = L10n.text("panel.stashCount", String(stashCount))
+        actions.setAccessibilityLabel(actions.title)
+        stash.setAccessibilityLabel(stash.title)
+        actions.toolTip = actions.title + " (⌘K)"
+        needsLayout = true
+    }
     private let inlinePreview = NSButton(frame: .zero)
     var onInlinePreview: (() -> Void)?
     var inlinePreviewVisible = false {
@@ -36,10 +50,10 @@ final class FooterBar: FlippedView {
     }
     var onSettings: (() -> Void)?
     private let syntax = KeyHint("⌘/", L10n.text("hint.syntax"))
-    var fileActions = true { didSet { hints[3].localize(L10n.text(fileActions ? "hint.copy" : "hint.copyResult")); needsLayout = true } }
+    var fileActions = true { didSet { needsLayout = true } }
     var spacePreview = false { didSet { updatePreviewKey() } }
     var previewKey: String { spacePreview ? L10n.text("hint.space") : "⌘Y" }
-    private func updatePreviewKey() { hints[2].key = previewKey; needsLayout = true }
+    private func updatePreviewKey() { hints[1].key = previewKey; needsLayout = true }
     var warning = false { didSet { status.textColor = warning ? .systemOrange : .tertiaryLabelColor; needsLayout = true } }
     var text: String { get { status.stringValue } set { status.stringValue = newValue } }
     var actionable = false { didSet { hints.forEach { $0.isHidden = !actionable }; needsLayout = true } }
@@ -54,6 +68,13 @@ final class FooterBar: FlippedView {
         inlinePreview.target = self
         inlinePreview.action = #selector(toggleInlinePreview)
         addSubview(inlinePreview)
+        addSubview(actions); addSubview(stash)
+        actions.onPress = { [weak self] in
+            guard let self else { return }
+            self.onActions?(self.actions)
+        }
+        stash.onPress = { [weak self] in self?.onStash?() }
+        refreshButtons()
         updateInlinePreviewButton()
         settings.onPress = { [weak self] in self?.onSettings?() }
         actionable = false
@@ -87,9 +108,10 @@ final class FooterBar: FlippedView {
         inlinePreview.setAccessibilityLabel(title)
     }
     func localize() {
+        refreshButtons()
         updateInlinePreviewButton()
         updatePreviewKey()
-        for (hint, key) in zip(hints, ["open", "reveal", "preview", "copy"]) { hint.localize(L10n.text("hint." + (key == "copy" && !fileActions ? "copyResult" : key))) }
+        for (hint, key) in zip(hints, ["open", "preview"]) { hint.localize(L10n.text("hint." + key)) }
         syntax.localize(L10n.text("hint.syntax")); settings.localize()
         if let (kind, value) = toastContent { toast.stringValue = Presentation.toastText(kind, value: value, chinese: L10n.chinese) }
         needsLayout = true
@@ -97,12 +119,20 @@ final class FooterBar: FlippedView {
     deinit { toastTimer?.invalidate() }
     override func layout() {
         super.layout()
-        let activeHints = fileActions ? hints : [hints[0], hints[3]]
-        let visibleHints = actionable && !warning ? activeHints + [syntax] : [syntax]
-        hints.forEach { $0.isHidden = !actionable || warning || !activeHints.contains($0) }
         settings.frame = NSRect(x: bounds.width - 18 - settings.desiredWidth, y: 4, width: settings.desiredWidth, height: 26)
         inlinePreview.frame = NSRect(x: settings.frame.minX - 29, y: 4, width: 26, height: 26)
-        var x = inlinePreview.frame.minX - 12 - visibleHints.reduce(0) { $0 + $1.desiredWidth } - CGFloat(visibleHints.count - 1) * 10
+        var right = inlinePreview.frame.minX - 6
+        for button in [actions, stash] {
+            let width = ceil(Theme.textWidth(button.title, font: button.font!)) + 14
+            button.frame = NSRect(x: right - width, y: 4, width: width, height: 26)
+            right = button.frame.minX
+        }
+        actions.isEnabled = actionable
+        let candidates = actionable && !warning ? Array(hints.prefix(fileActions ? 2 : 1)) + [syntax] : [syntax]
+        let hintWidth = candidates.reduce(0) { $0 + $1.desiredWidth + 8 }
+        let visibleHints = right - hintWidth >= 175 ? candidates : []
+        for hint in hints + [syntax] { hint.isHidden = !visibleHints.contains(hint) }
+        var x = right - visibleHints.reduce(0) { $0 + $1.desiredWidth + 10 }
         status.frame = NSRect(x: 22, y: 9, width: max(0, x - 38), height: 16)
         toast.frame = status.frame
         for hint in visibleHints { hint.frame = NSRect(x: x, y: 8, width: hint.desiredWidth, height: 18); x += hint.desiredWidth + 10 }
