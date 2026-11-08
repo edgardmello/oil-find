@@ -18,6 +18,8 @@ final class SettingsModel: ObservableObject {
     @Published var excludedExtensionsText: String
     @Published var pinyinEnabled: Bool
     @Published var excludedPaths: [String]
+    @Published private(set) var fileScripts: [FileScript]
+    @Published private(set) var fileScriptError: String?
     @Published var keyCode: UInt32
     @Published var modifiers: UInt32
     @Published var indexDependencyDirs: Bool
@@ -54,6 +56,7 @@ final class SettingsModel: ObservableObject {
         self.topics = topics ?? AITopicManager(defaults: preferences)
         self.snapshot = snapshot
         self.preferences = preferences
+        fileScripts = snapshot ? [] : FileScript.load(from: preferences)
         stashShortcuts = Dictionary(uniqueKeysWithValues: StashShortcut.allCases.map {
             ($0, snapshot ? $0.defaultChord : $0.chord(in: preferences))
         })
@@ -77,6 +80,7 @@ final class SettingsModel: ObservableObject {
             guard let self else { return }
             self.language = L10n.language
             self.shortcutError = L10n.relocalized(self.shortcutError)
+            self.fileScriptError = L10n.relocalized(self.fileScriptError)
             if let name = self.disconnectedDriveName { self.explanation = L10n.text("explain.disconnectedDrive", name) }
             else if let answer = self.coverageExplanation { self.explanation = L10n.explanation(answer) }
             self.onContentChange?()
@@ -193,6 +197,35 @@ final class SettingsModel: ObservableObject {
         excludedPaths = paths; SettingsPreferences.setExcludedPaths(paths, in: preferences)
         onContentChange?()
     }
+    func addFileScript(in window: NSWindow?) {
+        guard let window else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let isExecutable = (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+                    && FileManager.default.isExecutableFile(atPath: url.path)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    guard isExecutable else { self.fileScriptError = L10n.text("fileScripts.notExecutable"); return }
+                    self.fileScriptError = nil
+                    let script = FileScript(url: url)
+                    if !self.fileScripts.contains(script) {
+                        self.fileScripts.append(script)
+                        FileScript.save(self.fileScripts, to: self.preferences)
+                    }
+                }
+            }
+        }
+    }
+
+    func removeFileScript(_ script: FileScript) {
+        fileScripts.removeAll { $0 == script }
+        FileScript.save(fileScripts, to: preferences)
+    }
+
     func rebuild() { manager?.rescan(); rebuilding = manager != nil }
     func beginRecording(in window: NSWindow?, stashShortcut: StashShortcut? = nil) {
         guard !recording, let window else { return }
@@ -235,7 +268,7 @@ final class SettingsModel: ObservableObject {
             cancelRecording()
             return
         }
-        if stashShortcuts.values.contains(chord) {
+        if stashShortcuts.values.contains(chord) || FileScript.shortcutSlot(keyCode: code, modifiers: mask) != nil {
             shortcutError = L10n.text("settings.stashShortcutUnavailable"); onContentChange?(); return
         }
         if registerHotKey?(code, mask) == true {
@@ -381,6 +414,26 @@ private struct SettingsForm: View {
             Section(L10n.text("topicsTitle")) {
                 AITopicSettings(manager: model.topics)
             }
+            Section {
+                ForEach(Array(model.fileScripts.enumerated()), id: \.element.id) { index, script in
+                    HStack {
+                        Text(script.name).lineLimit(1).truncationMode(.middle).help(script.path)
+                        Spacer()
+                        if FileScript.shortcutKeys.indices.contains(index) {
+                            Text(Shortcut.symbols(keyCode: FileScript.shortcutKeys[index], modifiers: FileScript.shortcutModifiers))
+                                .foregroundStyle(.secondary)
+                        }
+                        Button { model.removeFileScript(script) } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(L10n.text("fileScripts.remove", script.name))
+                    }
+                }
+                Button(L10n.text("fileScripts.add")) { model.addFileScript(in: window()) }
+                if let error = model.fileScriptError { hint(error).foregroundStyle(.red) }
+            } header: { Text(L10n.text("fileScripts.title")) }
+              footer: { hint(L10n.text("fileScripts.hint")) }
             if let appExtension { appExtension.settingsSection(window: window) }
             Section {
                 if model.excludedPaths.isEmpty { Text(L10n.text("settings.noExcluded")).foregroundStyle(.secondary) }
