@@ -64,3 +64,38 @@ int sift_contains_unicode_folded(const uint8_t *text, size_t length, const uint8
     }
     return 0;
 }
+
+int sift_fuzzy_name_score(const uint8_t *name, size_t length, const uint8_t *needle, size_t needle_length) {
+    if (!needle_length) return 0;
+    size_t next = 0;
+    uint32_t wanted = scalar(needle, needle_length, &next);
+    int unicode_ready = 0;
+    if (wanted >= 128) { pthread_once(&unicode_once, init_unicode_locale); unicode_ready = 1; }
+    wanted = lower_scalar(wanted);
+    size_t gaps = 0, leading = 0;
+    int started = 0;
+    for (size_t offset = 0; offset < length;) {
+        uint32_t value = scalar(name, length, &offset);
+        if (value >= 128 && !unicode_ready) {
+            pthread_once(&unicode_once, init_unicode_locale);
+            unicode_ready = 1;
+        }
+        if (lower_scalar(value) != wanted) {
+            if (started) gaps++;
+            else leading++;
+            continue;
+        }
+        if (next == needle_length) {
+            // Keep subsequences below contiguous matches and reward shorter gaps.
+            return 360 - (int)(gaps < 96 ? gaps : 96) - (int)(leading < 24 ? leading : 24);
+        }
+        started = 1;
+        wanted = scalar(needle, needle_length, &next);
+        if (wanted >= 128 && !unicode_ready) {
+            pthread_once(&unicode_once, init_unicode_locale);
+            unicode_ready = 1;
+        }
+        wanted = lower_scalar(wanted);
+    }
+    return 0;
+}

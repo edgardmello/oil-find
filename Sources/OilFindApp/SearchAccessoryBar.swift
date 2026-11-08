@@ -35,6 +35,10 @@ final class SearchAccessoryBar: FlippedView {
         stashControls.append(button(L10n.text("panel.openStashWindow"), action: open))
     }
 
+    func revealAddedStashFiles(_ count: Int) {
+        stashTable.revealAddedFiles(count)
+    }
+
     func handleStashKey(_ event: NSEvent) -> Bool? { isHidden ? nil : stashTable.handleKey(event) }
 
     private func button(_ title: String, action: @escaping () -> Void) -> ChromeButton {

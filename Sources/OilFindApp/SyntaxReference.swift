@@ -28,7 +28,8 @@ final class SyntaxReference: FlippedView {
         ["kind:image", "按类型：folder、app、doc、image…"],
         ["size:>10mb", "按大小，也可写 1mb..5mb"],
         ["folder:", "只看文件夹，file: 只看文件"],
-        ["regex:^IMG_\\d+", "正则表达式"]
+        ["regex:^IMG_\\d+", "正则表达式"],
+        ["fuzzy:rdm", "按顺序匹配文件名中的字符"]
     ]
     static let moreEn = [
         ["foo | bar", "Contains either one"],
@@ -36,7 +37,8 @@ final class SyntaxReference: FlippedView {
         ["kind:image", "By kind: folder, app, doc, image…"],
         ["size:>10mb", "By size, or 1mb..5mb"],
         ["folder:", "Folders only, file: for files only"],
-        ["regex:^IMG_\\d+", "Regular expression"]
+        ["regex:^IMG_\\d+", "Regular expression"],
+        ["fuzzy:rdm", "Match filename characters in order"]
     ]
     static let keysZh = [
         ["↩  ⌘↩", "打开 / 在访达中显示"],
