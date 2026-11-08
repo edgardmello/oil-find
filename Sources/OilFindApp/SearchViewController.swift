@@ -19,6 +19,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     let results = ResultsView(frame: .zero)
     let footer = FooterBar(frame: .zero)
     let quickLook = QuickLook()
+    private let inlinePreview = InlinePreview(frame: .zero)
+    private(set) var inlinePreviewVisible = false
     private var quickLookDismissTime: CFAbsoluteTime = 0
     private let topLine = SeparatorView(), bottomLine = SeparatorView()
     private let empty = StateView(.empty), indexing = StateView(.indexing)
@@ -41,9 +43,10 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private var pendingNewSearch: Bool?
     private(set) var browsingResults = false
     var previewWithSpace: Bool { preferences.object(forKey: "previewWithSpace") as? Bool ?? true }
+    private var spaceOpensQuickLook: Bool { browsingResults && previewWithSpace && !inlinePreviewVisible }
     private func setBrowsing(_ browsing: Bool) {
         browsingResults = browsing
-        footer.spacePreview = browsing && previewWithSpace
+        footer.spacePreview = spaceOpensQuickLook
     }
     var manager: IndexManager?
     var supplementaryProvider: SupplementarySearchProvider?
@@ -70,6 +73,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if view.window?.isVisible == true { refreshSearch() }
     }
     func panelDidHide() {
+        setInlinePreviewVisible(false, resize: false)
         additionalSearchProvider?.visibilityChanged(false)
         supplementaryProvider?.userActivity(visible: false, typing: false)
     }
@@ -102,6 +106,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             }
         }
         results.localize()
+        refreshInlinePreview()
         if view.window?.isVisible == true || snapshot {
             refreshSearch()
         }
@@ -117,8 +122,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     override func loadView() { view = PanelSurface(snapshot: snapshot) }
     override func viewDidLoad() {
         super.viewDidLoad()
-        [searchField, topLine, filters, results, empty, indexing, bottomLine, footer, syntax].forEach(view.addSubview)
+        [searchField, topLine, filters, results, empty, indexing, bottomLine, footer, inlinePreview, syntax].forEach(view.addSubview)
         syntax.isHidden = true
+        inlinePreview.isHidden = true
         syntax.onExample = { [weak self] example in
             guard let self else { return }; self.setBrowsing(false); self.searchField.text = example; self.toggleSyntax(false); self.searchField.focus(); self.startSearch()
         }
@@ -140,6 +146,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         results.onOpen = { [weak self] in self?.openSelected() }
         results.onSelection = { [weak self] in
             self?.quickLook.refresh()
+            self?.refreshInlinePreview()
             self?.footer.fileActions = self?.results.selectedAdditional == nil
             if let self, let item = self.results.selectedItem {
                 self.selectionAnchor = (item.source.id, item.source.store, item.id, item.path)
@@ -171,6 +178,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             self.restoreFocus()
         }
         quickLook.onKey = { [weak self] event in self?.forwardPreviewKey(event) ?? false }
+        footer.onInlinePreview = { [weak self] in self?.toggleInlinePreview() }
         footer.onSettings = { [weak self] in self?.onSettings?() }
         languageObserver = NotificationCenter.default.addObserver(forName: L10n.changed, object: nil, queue: .main) { [weak self] _ in self?.localize() }
         setState(.indexing)
@@ -186,9 +194,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if let languageObserver { NotificationCenter.default.removeObserver(languageObserver) }
     }
     private func localize() {
-        footer.spacePreview = browsingResults && previewWithSpace
+        footer.spacePreview = spaceOpensQuickLook
         filters.localize(); footer.localize(); empty.localize(); indexing.localize(); syntax.localize(); results.localize()
-        searchField.localize()
+        searchField.localize(); inlinePreview.localize()
         refreshAdditionalFilter()
         if let result = results.result { updateFooter(result) }
         else if stateView === indexing { footer.text = L10n.text("footer.indexing", Presentation.countText(indexing.count)) }
@@ -203,7 +211,11 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         filters.frame = NSRect(x: 0, y: 64 + px, width: w, height: 40)
         let top: CGFloat = 104 + px
         let region = NSRect(x: 0, y: top, width: w, height: max(0, h - top - 34 - px))
-        [results, empty, indexing, syntax].forEach { $0.frame = region }
+        let previewWidth = inlinePreviewVisible && !syntaxVisible ? min(400, floor(region.width * 0.36)) : 0
+        let list = NSRect(x: 0, y: top, width: w - previewWidth, height: region.height)
+        [results, empty, indexing].forEach { $0.frame = list }
+        syntax.frame = region
+        inlinePreview.frame = NSRect(x: list.maxX, y: top, width: previewWidth, height: region.height)
         bottomLine.frame = NSRect(x: 0, y: h - 34 - px, width: w, height: px)
         footer.frame = NSRect(x: 0, y: h - 34, width: w, height: 34)
     }
@@ -211,6 +223,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         _ = view
         let previous: NSView = stateView ?? (results as NSView)
         stateView = state == .empty ? empty : state == .indexing ? indexing : nil
+        refreshInlinePreview()
         let target: NSView = stateView ?? (results as NSView)
         footer.actionable = !syntaxVisible && stateView == nil && (results.result?.total ?? 0) > 0
         guard previous !== target else { return }
@@ -403,6 +416,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     func toggleSyntax(_ show: Bool? = nil) {
         let visible = show ?? !syntaxVisible
         syntaxVisible = visible
+        refreshInlinePreview()
+        view.needsLayout = true
         footer.actionable = !visible && stateView == nil && (results.result?.total ?? 0) > 0
         syntax.isHidden = false
         Theme.Motion.opacity(syntax, to: visible ? 1 : 0, using: snapshot ? nil : Theme.Motion.chip)
@@ -505,12 +520,16 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             default: break
             }
         }
+        if flags.intersection([.command, .control, .option, .shift]) == [.command, .shift], key == "p" {
+            if !event.isARepeat { toggleInlinePreview() }
+            return true
+        }
         if command && event.keyCode == 44 { toggleSyntax(); return true }
         if syntaxVisible && event.keyCode == 53 { toggleSyntax(false); return true }
         if syntaxVisible { return false }
         if [126, 125, 116, 121, 115, 119].contains(event.keyCode) { setBrowsing(true) }
         if event.keyCode == 49 && flags.intersection([.command, .control, .option, .shift]).isEmpty
-            && (quickLook.isVisible || (browsingResults && previewWithSpace)) {
+            && (quickLook.isVisible || spaceOpensQuickLook) {
             // Space always dismisses an open preview; holding it must not flicker the panel.
             if !event.isARepeat { previewSelected() }
             return true
@@ -588,6 +607,36 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
         return snapshot || current?.store === item.source.store
     }
+    private func toggleInlinePreview() {
+        if syntaxVisible { toggleSyntax(false) }
+        setInlinePreviewVisible(!inlinePreviewVisible)
+        restoreFocus()
+    }
+
+    func setInlinePreviewVisible(_ visible: Bool, resize: Bool = true) {
+        guard visible != inlinePreviewVisible else { return }
+        inlinePreviewVisible = visible
+        footer.inlinePreviewVisible = visible
+        footer.spacePreview = spaceOpensQuickLook
+        refreshInlinePreview()
+        if resize { (view.window as? SearchPanel)?.resizeForInlinePreview() }
+        view.needsLayout = true
+    }
+
+    private func refreshInlinePreview() {
+        let visible = inlinePreviewVisible && !syntaxVisible
+        inlinePreview.isHidden = !visible
+        guard visible, stateView == nil, let item = results.selectedItem else {
+            inlinePreview.update(url: nil)
+            return
+        }
+        let online = item.source.isOnline && (snapshot || searchSources.contains {
+            $0.id == item.source.id && $0.isOnline && $0.store === item.source.store
+        })
+        inlinePreview.update(url: online ? URL(fileURLWithPath: item.path) : nil,
+                             isDirectory: item.flags & SiftFlag.dir != 0, isUnavailable: !online)
+    }
+
     private func previewSelected() {
         if quickLook.isVisible { quickLook.close() } else if allowOnlineAction() { quickLook.open() }
     }

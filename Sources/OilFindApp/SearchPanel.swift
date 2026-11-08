@@ -94,14 +94,23 @@ final class SearchPanel: NSPanel {
     func toggle(source: PanelSource = .hotkey) {
         if isVisible && isKeyWindow && !hiding { hide(source: source) } else { show(source: source) }
     }
+    func resizeForInlinePreview(usePointerScreen: Bool = false, display: Bool = true) {
+        let target = usePointerScreen
+            ? NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
+            : screen
+        guard let screen = target ?? NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        let width = min(searchController.inlinePreviewVisible ? 1160 : 800, visible.width - 80)
+        let height = min(560, visible.height - 120)
+        let frame = NSRect(x: (visible.midX - width / 2).rounded(), y: (visible.midY - height / 2).rounded(),
+                           width: width, height: height)
+        setFrame(frame, display: display)
+        invalidateShadow()
+    }
     func show(source: PanelSource = .interaction) {
         let cold = !isVisible
-        if cold {
-            let mouse = NSEvent.mouseLocation
-            guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main else { return }
-            let size = NSSize(width: min(800, screen.visibleFrame.width - 80), height: min(560, screen.visibleFrame.height - 120))
-            let frame = NSRect(x: (screen.frame.midX - size.width / 2).rounded(), y: (screen.frame.midY - size.height / 2).rounded(), width: size.width, height: size.height)
-            setFrame(frame, display: false)
+        if cold || hiding {
+            resizeForInlinePreview(usePointerScreen: cold, display: false)
         }
         AppLog.logger.info("panel show source=\(source.rawValue, privacy: .public)")
         animationGeneration += 1; hiding = false; fade?.stop()
