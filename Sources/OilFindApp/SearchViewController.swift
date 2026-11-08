@@ -151,6 +151,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         searchField.onChange = { [weak self] in self?.setBrowsing(false); self?.startSearch() }
         searchField.onKey = { [weak self] event in self?.handleKey(event) ?? false }
         filters.onChange = { [weak self] in self?.scopeChanged(resetAdditional: false) }
+        results.setCompact(preferences.bool(forKey: "compactResults"))
         filters.scopeMenu = { [weak self] in self?.makeScopeMenu() ?? NSMenu() }
         filters.onSortChange = { [weak self] in
             guard let self, !self.snapshot else { return }
@@ -308,7 +309,23 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         hidden.state = hiddenOnly ? .on : .off
         let quick = menu.addItem(withTitle: L10n.text("quickFilter.title"), action: nil, keyEquivalent: "")
         quick.submenu = makeQuickFilterMenu()
+        menu.addItem(.separator())
+        let viewStyle = menu.addItem(withTitle: L10n.text("view.results"), action: nil, keyEquivalent: "")
+        let styles = NSMenu()
+        for (tag, key) in ["view.original", "view.compact"].enumerated() {
+            let item = styles.addItem(withTitle: L10n.text(key), action: #selector(selectResultsView(_:)), keyEquivalent: "")
+            item.tag = tag
+            item.target = self
+            item.state = (tag == 1) == results.compact ? .on : .off
+        }
+        viewStyle.submenu = styles
         return menu
+    }
+
+    @objc private func selectResultsView(_ item: NSMenuItem) {
+        let compact = item.tag == 1
+        results.setCompact(compact)
+        if !snapshot { preferences.set(compact, forKey: "compactResults") }
     }
 
     private func makeQuickFilterMenu() -> NSMenu {
@@ -800,6 +817,16 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             footer.text = L10n.text("footer.results", Presentation.countText(0), Presentation.elapsedText(found.elapsedMs))
         }
     }
+    #if DEBUG
+    func prepareStashSnapshot() {
+        let files = (0..<6).compactMap { results.item(at: $0) }.map { StashedFile(url: URL(fileURLWithPath: $0.path)) }
+        footer.stashCount = files.count
+        accessories.setStash(files: files, expanded: true, copy: {}, open: {}, dragging: { _ in },
+                             leaveSearch: {}, remove: { _ in }, menuDelegate: self)
+        view.needsLayout = true
+    }
+    #endif
+
     private var selectedURL: URL? {
         guard stateView == nil else { return nil }
         return results.selectedItem.map { URL(fileURLWithPath: $0.path) }

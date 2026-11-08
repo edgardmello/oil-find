@@ -5,6 +5,34 @@ import OilFindCore
 @testable import OilFindApp
 
 final class ResultsSelectionTests: XCTestCase {
+    func testSwitchingToCompactTableKeepsMultipleSelection() throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for index in 0..<4 { try Data().write(to: root.appendingPathComponent("row\(index).txt")) }
+        let config = IndexConfig(rootPath: root.path)
+        let store = IndexStore(scan: try XCTUnwrap(Scanner(config: config, threads: 1).run()), config: config)
+        let controller = SearchViewController(snapshot: true)
+        try controller.prepareSnapshot(state: "results", query: "row", options: .init(sort: .name),
+                                       store: store, selection: 1)
+        let results = controller.results
+        results.extend(1)
+        let paths = results.selectedItems.map(\.path)
+        XCTAssertEqual(paths.count, 2)
+        let scroll = try XCTUnwrap(results.subviews.compactMap { $0 as? NSScrollView }.first)
+        let table = try XCTUnwrap(scroll.documentView as? NSTableView)
+
+        results.setCompact(true)
+        XCTAssertEqual(table.rowHeight, CompactFileTable.rowHeight)
+        XCTAssertNotNil(table.headerView)
+        XCTAssertEqual(results.selectedItems.map(\.path), paths)
+        results.setCompact(false)
+        XCTAssertEqual(table.rowHeight, Theme.rowHeight)
+        XCTAssertNil(table.headerView)
+        XCTAssertEqual(results.selectedItems.map(\.path), paths)
+    }
+
     func testCategoryMotionSurvivesSearchRefreshAndLayout() throws {
         _ = NSApplication.shared
         if Theme.Motion.reduced { throw XCTSkip("Category motion respects Reduce Motion") }

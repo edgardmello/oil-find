@@ -31,6 +31,9 @@ final class ResultCell: NSTableCellView {
     private let pathLabel = Theme.label(11.5, .regular, .secondaryLabelColor)
     private let dateLabel = Theme.label(11.5, .regular, .secondaryLabelColor)
     private let sizeLabel = Theme.label(11.5, .regular, .tertiaryLabelColor)
+    var compact = false {
+        didSet { if compact != oldValue { applyStyle() } }
+    }
     private var configuration = 0
     private var displayingThumbnail = false
     override init(frame: NSRect) {
@@ -47,6 +50,15 @@ final class ResultCell: NSTableCellView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func layout() {
         super.layout()
+        if compact {
+            icon.frame = NSRect(x: 14, y: 4, width: 16, height: 16)
+            var x = CompactFileTable.iconWidth
+            for (label, width) in zip([nameLabel, pathLabel, sizeLabel, dateLabel], CompactFileTable.widths(for: bounds.width)) {
+                label.frame = NSRect(x: x + 6, y: 4, width: max(0, width - 12), height: 16)
+                x += width
+            }
+            return
+        }
         icon.frame = NSRect(x: 26, y: 9, width: 32, height: 32)
         let width = max(0, bounds.width - 236)
         nameLabel.frame = NSRect(x: 70, y: 8, width: width, height: 18)
@@ -79,6 +91,24 @@ final class ResultCell: NSTableCellView {
             icon.layer?.backgroundColor = (displayingThumbnail ? NSColor.quaternaryLabelColor.withAlphaComponent(0.08) : NSColor.clear).cgColor
         }
     }
+    private static let compactNameParagraph: NSParagraphStyle = {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingMiddle
+        return paragraph
+    }()
+
+    private func applyStyle() {
+        nameLabel.lineBreakMode = compact ? .byTruncatingMiddle : .byTruncatingTail
+        nameLabel.font = .systemFont(ofSize: compact ? 12 : 13.5, weight: compact ? .regular : .medium)
+        pathLabel.font = .systemFont(ofSize: compact ? 11 : 11.5)
+        dateLabel.font = compact ? .monospacedSystemFont(ofSize: 11, weight: .regular) : .systemFont(ofSize: 11.5)
+        sizeLabel.font = compact ? .monospacedSystemFont(ofSize: 11, weight: .regular) : .monospacedDigitSystemFont(ofSize: 11.5, weight: .regular)
+        dateLabel.alignment = compact ? .left : .right
+        sizeLabel.alignment = dateLabel.alignment
+        dateLabel.textColor = compact ? .labelColor : .secondaryLabelColor
+        sizeLabel.textColor = compact ? .labelColor : .tertiaryLabelColor
+    }
+
     func configure(_ item: ResultItem, query: Query, icons: IconProvider) {
         configuration += 1
         sizeLabel.lineBreakMode = .byTruncatingTail
@@ -87,13 +117,14 @@ final class ResultCell: NSTableCellView {
         updateThumbnailStyle()
         let name = NSMutableAttributedString(string: item.name, attributes: [.font: nameLabel.font!, .foregroundColor: item.source.isOnline ? NSColor.labelColor : NSColor.tertiaryLabelColor])
         for range in item.source.isOnline ? Presentation.highlightRanges(name: item.name, query: query) : [] {
-            name.addAttributes([.foregroundColor: NSColor.controlAccentColor, .font: NSFont.systemFont(ofSize: 13.5, weight: .semibold)], range: range)
+            name.addAttributes([.foregroundColor: NSColor.controlAccentColor, .font: NSFont.systemFont(ofSize: compact ? 12 : 13.5, weight: .semibold)], range: range)
         }
+        if compact { name.addAttribute(.paragraphStyle, value: Self.compactNameParagraph, range: NSRange(location: 0, length: name.length)) }
         nameLabel.attributedStringValue = name
         pathLabel.stringValue = Presentation.abbreviate(path: item.parentPath, home: NSHomeDirectory()) + (item.source.isOnline ? "" : " · " + L10n.text("source.offline"))
-        detailLabel.isHidden = item.detail == nil
+        detailLabel.isHidden = compact || item.detail == nil
         detailLabel.stringValue = ""
-        if let detail = item.detail {
+        if !compact, let detail = item.detail {
             let decoration = detail.presentation
             let text = NSMutableAttributedString(string: decoration.text, attributes: [.font: detailLabel.font!, .foregroundColor: NSColor.secondaryLabelColor])
             for range in decoration.highlights where NSMaxRange(range) <= text.length {
@@ -102,14 +133,14 @@ final class ResultCell: NSTableCellView {
             }
             detailLabel.attributedStringValue = text
         }
-        dateLabel.stringValue = Presentation.dateText(item.modified, now: Date(), calendar: .current, chinese: L10n.chinese)
+        dateLabel.stringValue = compact ? CompactFileTable.date(item.modified) : Presentation.dateText(item.modified, now: Date(), calendar: .current, chinese: L10n.chinese)
         sizeLabel.stringValue = item.kind == 2 ? L10n.text("meta.app") : item.flags & SiftFlag.dir != 0 && item.flags & SiftFlag.package == 0 ? L10n.text("meta.folder") : Presentation.sizeText(item.size)
         toolTip = item.detail.map { "\(item.path)\n\n\($0.presentation.text)" } ?? item.path
         icon.image = icons.icon(name: item.name, path: item.path, flags: item.flags, kind: item.kind, resolveFileIcon: item.source.isOnline) { [weak self] image in
             guard let self, self.configuration == token, !self.displayingThumbnail else { return }
             self.icon.image = image
         }
-        if item.detail?.thumbnail == true && item.source.isOnline {
+        if !compact, item.detail?.thumbnail == true && item.source.isOnline {
             icons.thumbnail(path: item.path, modified: item.modified) { [weak self] image in
                 guard let self, self.configuration == token else { return }
                 self.icon.image = image
@@ -131,7 +162,7 @@ final class ResultCell: NSTableCellView {
         nameLabel.attributedStringValue = highlighted(item.title, font: nameLabel.font!, color: .labelColor)
         detailLabel.isHidden = true; detailLabel.stringValue = ""
         pathLabel.attributedStringValue = highlighted(item.detail, font: pathLabel.font!, color: .secondaryLabelColor)
-        dateLabel.stringValue = Presentation.dateText(item.modified, now: Date(), calendar: .current, chinese: L10n.chinese)
+        dateLabel.stringValue = compact ? CompactFileTable.date(item.modified) : Presentation.dateText(item.modified, now: Date(), calendar: .current, chinese: L10n.chinese)
         sizeLabel.stringValue = item.location; sizeLabel.lineBreakMode = .byTruncatingMiddle
         icon.image = item.icon; toolTip = item.location + "\n" + item.detail; needsLayout = true
     }
@@ -201,6 +232,39 @@ func resultRefreshAction(oldItems: [UInt32], newItems: [UInt32], sameStore: Bool
 final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate {
     private let scroll = ResultScrollView()
     private let table = ResultTable()
+    private let compactHeader = CompactFileHeader(stash: false)
+    private(set) var compact = false
+
+    func setCompact(_ enabled: Bool) {
+        guard compact != enabled else { return }
+        let selection = table.selectedRowIndexes
+        let focused = selectedRow
+        let topRow = max(0, scroll.contentView.bounds.minY + scroll.contentInsets.top) / table.rowHeight
+        compact = enabled
+        refreshing = true
+        table.rowHeight = enabled ? CompactFileTable.rowHeight : Theme.rowHeight
+        table.headerView = enabled ? compactHeader : nil
+        table.gridStyleMask = enabled ? .solidHorizontalGridLineMask : []
+        table.gridColor = .separatorColor
+        scroll.contentInsets = enabled ? NSEdgeInsets() : NSEdgeInsets(top: 6, left: 0, bottom: 6, right: 0)
+        scroll.drawsBackground = enabled
+        scroll.backgroundColor = .controlBackgroundColor
+        scroll.wantsLayer = true
+        scroll.layer?.cornerRadius = enabled ? CompactFileTable.inset : 0
+        scroll.layer?.masksToBounds = enabled
+        table.minimumDocumentHeight = 0
+        table.reloadData()
+        table.selectRowIndexes(selection, byExtendingSelection: false)
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+        scroll.tile()
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: topRow * table.rowHeight - scroll.contentInsets.top))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        if focused >= 0, !table.visibleRect.contains(table.rect(ofRow: focused)) { table.scrollRowToVisible(focused) }
+        refreshing = false
+        updateSelection(animated: false)
+        recomputeHover()
+    }
     private let hoverPlate = TintPlate(radius: 10) { _ in NSColor.labelColor.withAlphaComponent(0.04) }
     private let selectionPlate = TintPlate(radius: 10) { view in
         NSColor.controlAccentColor.withAlphaComponent(Theme.dark(view) ? 0.30 : 0.16)
@@ -280,7 +344,7 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func layout() {
-        super.layout(); scroll.frame = bounds
+        super.layout(); scroll.frame = compact ? bounds.insetBy(dx: CompactFileTable.inset, dy: 4) : bounds
         let width = scroll.contentSize.width
         if table.tableColumns[0].width != width { table.tableColumns[0].width = width }
         updateSelection(animated: false); recomputeHover()
@@ -294,7 +358,7 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
         table.minimumDocumentHeight = 0
         self.result = result; table.reloadData()
         select(selection)
-        if resetScroll { scroll.contentView.scroll(to: NSPoint(x: 0, y: -6)); scroll.reflectScrolledClipView(scroll.contentView) }
+        if resetScroll { scroll.contentView.scroll(to: NSPoint(x: 0, y: -scroll.contentInsets.top)); scroll.reflectScrolledClipView(scroll.contentView) }
         updateSelection(animated: false); refreshing = false
         rememberSelection(); recomputeHover(); onSelection?()
     }
@@ -312,6 +376,7 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
     func localize() {
         guard !scrolling, !dragging else { pendingLocalization = true; return }
         pendingLocalization = false
+        compactHeader.needsDisplay = true
         let origin = scroll.contentView.bounds.origin
         defer { scroll.contentView.scroll(to: origin); scroll.reflectScrolledClipView(scroll.contentView) }
         let range = table.rows(in: table.visibleRect)
@@ -460,7 +525,7 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
         if !repeatKey && (target < 0 || target >= result.count) { nudge(delta) }
         select(target, repeatKey: repeatKey)
     }
-    func page(_ delta: Int, repeatKey: Bool = false) { select(max(0, selectedRow) + delta * max(1, Int(scroll.contentSize.height / Theme.rowHeight)), repeatKey: repeatKey) }
+    func page(_ delta: Int, repeatKey: Bool = false) { select(max(0, selectedRow) + delta * max(1, Int(scroll.contentSize.height / table.rowHeight)), repeatKey: repeatKey) }
     private func updateSelection(animated: Bool) {
         guard selectedRow >= 0 else { selectionPlate.isHidden = true; return }
         let rect = table.rect(ofRow: selectedRow).insetBy(dx: 10, dy: 1)
@@ -507,6 +572,7 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
         let identifier = NSUserInterfaceItemIdentifier("cell")
         let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? ResultCell ?? ResultCell(frame: .zero)
         cell.identifier = identifier
+        cell.compact = compact
         if let item = result?.additional(at: row), let result { cell.configure(item, query: result.query) }
         else if let item = item(at: row), let result { cell.configure(item, query: result.query, icons: icons) }
         return cell

@@ -13,7 +13,7 @@ final class InlineStashTableTests: XCTestCase {
         XCTAssertEqual(table.tableColumns.map { $0.identifier.rawValue }, ["name", "path", "size", "date"])
         XCTAssertTrue(table.allowsMultipleSelection)
         XCTAssertTrue(tableView.hasVerticalScroller)
-        XCTAssertEqual(tableView.desiredHeight, 156)
+        XCTAssertEqual(tableView.desiredHeight, 172)
         tableView.update(files, visible: false)
         XCTAssertEqual(tableView.desiredHeight, 0)
     }
