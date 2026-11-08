@@ -28,12 +28,7 @@ scripts/build-app.sh --debug
 scripts/package.sh
 ```
 
-`Pro/` 是工作区内可选的独立私有仓库，不属于本公开仓库，由 `/Pro/` 忽略规则排除。缺少私有模块时构建免费版；本机存在私有模块时可强制验证免费版：
-
-```sh
-OILFIND_FREE=1 swift build
-OILFIND_FREE=1 swift test --filter '<受影响的测试>'
-```
+`Pro/` 保留内部模块的目录名称。个人分支只有一个构建，始终包含内容搜索，不提供应用内更新检查。
 
 官网使用 Node.js 22 与 pnpm：
 
@@ -48,7 +43,7 @@ pnpm build
 ## 约定
 
 - 应用使用 Swift 5 语言模式与一个 C target，只用系统框架，不引入第三方包。
-- 公开应用库与核心不得依赖私有模块，只通过中性的 `ApplicationExtension` 接入。仅 `Package.swift` 和 `Sources/OilFind/main.swift` 可提及私有 target，分别用于条件构建与组装；入口不解析私有功能状态或参数。扩展提供启动、退出、设置分区、URL、语言接口，DEBUG 下可预处理并移除自身参数。
+- 公开应用库与核心不得依赖私有模块，只通过中性的 `ApplicationExtension` 接入。仅 `Package.swift` 和 `Sources/OilFind/main.swift` 可提及私有 target，分别用于声明依赖与组装；入口不解析私有功能状态或参数。扩展提供启动、退出、设置分区、URL、语言接口，DEBUG 下可预处理并移除自身参数。
 - 扫描、搜索、事件处理热路径使用 Unsafe 指针和 SoA 布局，不创建 String，不逐项堆分配。
 - 代码注释用英文。修改界面文案时维护 `L10n.swift` 中的中英文对应项。
 - 索引文件只保留一份，临时文件用完即删。没有完全磁盘访问权限时静默跳过 EPERM 目录。

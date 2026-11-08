@@ -54,8 +54,7 @@ final class SearchPresentation {
     func including(_ items: [AdditionalSearchItem], options: SearchOptions, elapsedMs: Double = 0) -> SearchPresentation {
         let result = copyFiles(); result.additionalElapsedMs = elapsedMs
         guard !items.isEmpty else { return result }
-        let sort = query.isEmpty ? SortKey.modified : options.sort
-        let ascending = !query.isEmpty && options.ascending
+        let (sort, ascending) = options.effectiveSort(for: query)
         var sourceScores: [String: [UInt32: Int32]] = [:]
         if sort == .relevance, let multiple {
             for (i, source) in multiple.sources.enumerated() {

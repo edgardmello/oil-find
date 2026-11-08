@@ -8,7 +8,6 @@ final class SettingsModel: ObservableObject {
     @Published private(set) var language: AppLanguage
     @Published var launchAtLogin: Bool
     let topics: AITopicManager
-    let update: UpdateManager
     private var languageObserver: NSObjectProtocol?
     private let languageDefaults: UserDefaults
     private var coverageExplanation: CoverageExplanation?
@@ -54,7 +53,6 @@ final class SettingsModel: ObservableObject {
         self.preferences = preferences
         self.languageDefaults = languageDefaults
         self.language = L10n.language
-        self.update = snapshot ? UpdateManager(snapshot: true) : .shared
         launchAtLogin = snapshot ? false : SMAppService.mainApp.status == .enabled
         if !snapshot { SettingsPreferences.register() }
         let defaults = UserDefaults.standard
@@ -91,7 +89,11 @@ final class SettingsModel: ObservableObject {
     func stopRefreshing() { timer?.invalidate(); timer = nil; cancelRecording() }
     func refresh() {
         let wasGranted = granted
-        if !snapshot { launchAtLogin = SMAppService.mainApp.status == .enabled }
+        if !snapshot {
+            launchAtLogin = SMAppService.mainApp.status == .enabled
+            let paths = ExcludedFolders.adding(preferences.stringArray(forKey: "userExcludedPaths") ?? [], to: [])
+            if excludedPaths != paths { excludedPaths = paths; onContentChange?() }
+        }
         granted = snapshot ? false : Permissions.hasFullDiskAccess()
         rebuilding = manager?.isRescanning == true || manager?.state == .scanning || manager?.state == .loading
         var stats = CoverageStats()
@@ -173,7 +175,7 @@ final class SettingsModel: ObservableObject {
     func addFolders(in window: NSWindow?) {
         guard let window else { return }
         let panel = NSOpenPanel()
-        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = true; panel.canChooseFiles = true; panel.allowsMultipleSelection = true
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self, response == .OK else { return }
             self.setExcluded(ExcludedFolders.adding(panel.urls.map(\.path), to: self.excludedPaths))
@@ -182,8 +184,8 @@ final class SettingsModel: ObservableObject {
     func removeFolder(_ path: String) { setExcluded(excludedPaths.filter { $0 != path }) }
     private func setExcluded(_ paths: [String]) {
         guard paths != excludedPaths else { return }
-        excludedPaths = paths; UserDefaults.standard.set(paths, forKey: "userExcludedPaths")
-        onConfigChange?(); onContentChange?()
+        excludedPaths = paths; SettingsPreferences.setExcludedPaths(paths, in: preferences)
+        onContentChange?()
     }
     func rebuild() { manager?.rescan(); rebuilding = manager != nil }
     func beginRecording(in window: NSWindow?) {
@@ -230,24 +232,6 @@ final class SettingsModel: ObservableObject {
     }
 }
 
-private struct UpdateSettingsRow: View {
-    @ObservedObject var update: UpdateManager
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Toggle(L10n.text("update.auto"), isOn: $update.automatic)
-                    Text(L10n.text("update.autoHint")).font(.footnote).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Button(L10n.text("update.check")) { update.check() }.disabled(!update.canCheck)
-            }
-            Text(UpdateManager.current.version.text).font(.footnote).foregroundStyle(.secondary)
-        }
-    }
-}
-
 private struct LanguagePicker: NSViewRepresentable {
     @ObservedObject var model: SettingsModel
     final class Coordinator: NSObject {
@@ -286,7 +270,7 @@ private struct SettingsForm: View {
                     Text(L10n.text("settings.language")); Spacer()
                     LanguagePicker(model: model).frame(width: 140, height: 24)
                 }
-                UpdateSettingsRow(update: model.update).id(model.language)
+                Text(UpdateManager.current.version.text).font(.footnote).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 5) {
                     Toggle(L10n.text("settings.login"), isOn: Binding(get: { model.launchAtLogin }, set: model.setLogin))
                     if let error = model.loginError { hint(error).foregroundStyle(.red) }

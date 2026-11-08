@@ -20,13 +20,16 @@ final class FilterBar: FlippedView, NSMenuDelegate {
             refresh(); needsLayout = true
         }
     }
+    private let scopeButton = ChromeButton("", style: .plain, size: 12, weight: .medium)
+    var scopeActive = false { didSet { refreshScope() } }
+    var scopeMenu: (() -> NSMenu)?
     private let sortButton = ChromeButton("", style: .plain, size: 12, weight: .medium)
     var onChange: (() -> Void)?
     var onMenuTracking: ((Bool) -> Void)?
     var onSortChange: (() -> Void)?
     var options = SearchOptions() { didSet { refresh() } }
     var isEnabled = true {
-        didSet { alphaValue = isEnabled ? 1 : 0.4; (buttons + [sortButton]).forEach { $0.isEnabled = isEnabled } }
+        didSet { alphaValue = isEnabled ? 1 : 0.4; (buttons + [sortButton, scopeButton]).forEach { $0.isEnabled = isEnabled } }
     }
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -41,13 +44,27 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         buttons.append(additional); buttonWidths.append(0); addSubview(additional)
         sortButton.trailingSymbol = Theme.symbol("arrow.up.arrow.down", size: 10, weight: .medium)
         sortButton.onPress = { [weak self] in self?.showSortMenu() }
-        addSubview(sortButton); refresh()
+        scopeButton.trailingSymbol = Theme.symbol("chevron.down", size: 10, weight: .medium)
+        scopeButton.onPress = { [weak self] in
+            guard let self, let menu = self.scopeMenu?() else { return }
+            menu.delegate = self
+            menu.popUp(positioning: nil, at: NSPoint(x: self.scopeButton.frame.minX, y: self.scopeButton.frame.maxY), in: self)
+        }
+        addSubview(scopeButton)
+        addSubview(sortButton); refresh(); refreshScope()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     static func sortName(_ key: SortKey) -> String {
         switch key { case .relevance: return "relevance"; case .name: return "name"; case .modified: return "modified"; case .size: return "size" }
     }
+    private func refreshScope() {
+        scopeButton.title = L10n.text("scope.menu")
+        scopeButton.textTint = scopeActive ? .controlAccentColor : nil
+        scopeButton.needsDisplay = true
+        needsLayout = true
+    }
     func localize() {
+        refreshScope()
         for (i, button) in buttons.prefix(Self.names.count).enumerated() {
             button.title = L10n.text("filter." + Self.names[i])
             buttonWidths[i] = Theme.textWidth(button.title, font: button.font!) + 22
@@ -67,7 +84,8 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         var x: CGFloat = 18
         let visibleCount = Self.names.count + (additionalTitle == nil ? 0 : 1)
         let sortWidth = Theme.textWidth(sortButton.title, font: sortButton.font!) + 16
-        let available = max(0, bounds.width - 36 - sortWidth - 12 - CGFloat(visibleCount - 1) * 2)
+        let scopeWidth = Theme.textWidth(scopeButton.title, font: scopeButton.font!) + 24
+        let available = max(0, bounds.width - 36 - sortWidth - scopeWidth - 18 - CGFloat(visibleCount - 1) * 2)
         let natural = buttonWidths.prefix(visibleCount).reduce(0, +)
         let reduction = max(0, (natural - available) / CGFloat(visibleCount))
         for (i, button) in buttons.prefix(visibleCount).enumerated() {
@@ -76,6 +94,7 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         }
         let width = Theme.textWidth(sortButton.title, font: sortButton.font!) + 16
         sortButton.frame = NSRect(x: bounds.width - 18 - width, y: 7, width: width, height: 26)
+        scopeButton.frame = NSRect(x: sortButton.frame.minX - 6 - scopeWidth, y: 7, width: scopeWidth, height: 26)
         laidOut = true; moveCapsule(animated: false)
     }
     private func moveCapsule(animated: Bool) {
@@ -97,6 +116,7 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         guard isEnabled else { return }
         let menu = NSMenu(); menu.delegate = self
         for (i, key) in [SortKey.relevance, .name, .modified, .size].enumerated() {
+            if i == 0 && options.sortsRecentResults { continue }
             let item = NSMenuItem(title: L10n.text("sort." + Self.sortName(key)), action: #selector(sortSelected(_:)), keyEquivalent: "")
             item.tag = i; item.target = self; item.state = options.sort == key ? .on : .off
             menu.addItem(item)

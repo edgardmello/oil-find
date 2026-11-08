@@ -64,7 +64,7 @@ public struct IndexConfig {
         return h
     }
     public var scopeFingerprint: UInt64 {
-        var scope = self; scope.excludedExtensions = []
+        var scope = self; scope.excludedExtensions = []; scope.userExcludedPaths = []
         return scope.fingerprint
     }
     // Catalog identity and relative exclusions remain stable after a volume rename.

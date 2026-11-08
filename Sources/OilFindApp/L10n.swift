@@ -39,6 +39,7 @@ enum L10n {
         case .noAccess: return text("explain.noAccess")
         case .volume: return text("explain.volume")
         case .cloud: return text("explain.cloud")
+        case .missing: return text("explain.missing")
         case .pending: return text("explain.pending")
         }
     }
@@ -116,11 +117,12 @@ enum L10n {
         "coverage.volumes": ("外置磁盘和网络卷：%@ 个（不在索引范围内）", "External and network volumes: %@ (not indexed)"),
         "coverage.check": ("检查文件为什么搜不到…", "Why Can't I Find a File…"),
         "explain.indexed": ("已在索引中，可以搜到。", "It's in the index and can be found."),
-        "explain.scope": ("被「%@」范围排除。在上面打开这个开关后就能搜到。", "Excluded by the \"%@\" scope. Turn it on above to include it."),
+        "explain.scope": ("被「%@」范围排除。", "Excluded by the \"%@\" scope."),
         "explain.userExcluded": ("在你排除的路径「%@」里。", "It's inside a path you excluded: %@."),
         "explain.noAccess": ("Oil Find 没有权限读取它所在的文件夹。授予完全磁盘访问权限后会自动补上。", "Oil Find can't read the folder it's in. It'll be added once you grant Full Disk Access."),
         "explain.volume": ("它在外置磁盘或网络卷上，不在索引范围内。", "It's on an external or network volume, which isn't indexed."),
         "explain.cloud": ("它在仅存于云端的文件夹里，下载到这台 Mac 后才能搜到。", "It's in a folder that's only in the cloud. Download it to this Mac to search it."),
+        "explain.missing": ("此路径不存在。", "This path does not exist."),
         "explain.pending": ("还没有进入索引，稍后会自动加入。", "It isn't indexed yet. It'll be added shortly."),
         "empty.noAccess": ("有些文件夹没有访问权限，其中的文件搜不到。", "Some folders aren't accessible, so files in them can't be found."),
         "empty.grant": ("授予权限…", "Grant Access…"),
@@ -146,6 +148,25 @@ enum L10n {
         "footer.recent": ("最近修改 · 已索引 %@ 项", "Recently modified · %@ items indexed"),
         "footer.indexing": ("正在建立索引 · 已扫描 %@ 项", "Building index · %@ items scanned"),
         "hint.open": ("打开", "Open"), "hint.reveal": ("在访达中显示", "Show in Finder"),
+        "scope.hiddenOnly": ("仅显示隐藏项目", "Hidden Items Only"),
+        "scope.exclusionSaved": ("已添加排除规则，正在更新索引…", "Exclusion saved. Updating the index…"),
+        "quickFilter.title": ("快速筛选", "Quick Filters"),
+        "quickFilter.save": ("保存当前搜索…", "Save Current Search…"),
+        "quickFilter.remove": ("删除快速筛选", "Delete Quick Filter"),
+        "quickFilter.saveTitle": ("保存快速筛选", "Save Quick Filter"),
+        "quickFilter.name": ("名称", "Name"),
+        "quickFilter.saveButton": ("保存", "Save"),
+        "quickFilter.cancel": ("取消", "Cancel"),
+        "ctx.exclude": ("从索引中排除", "Exclude from Index"),
+        "scope.menu": ("范围", "Scope"),
+        "scope.allVolumes": ("所有磁盘", "All Volumes"),
+        "scope.unavailable": ("无法搜索此磁盘：%@", "Volume unavailable: %@"),
+        "scope.startup": ("启动磁盘", "Startup Disk"),
+        "scope.clearFolder": ("清除文件夹筛选：%@", "Clear Folder Filter (%@)"),
+        "scope.inFolder": ("在此文件夹中搜索", "Search in This Folder"),
+        "path.unavailable": ("无法打开此路径", "This path could not be opened"),
+        "ctx.openWith": ("打开方式…", "Open With…"),
+        "ctx.noApplications": ("没有可用的应用", "No available applications"),
         "inlinePreview.show": ("显示侧边预览", "Show Side Preview"),
         "inlinePreview.hide": ("隐藏侧边预览", "Hide Side Preview"),
         "inlinePreview.select": ("选择文件以预览", "Select a file to preview"),
@@ -212,9 +233,9 @@ enum L10n {
         "settings.scope.libraryHint": ("~/Library 里的应用数据。iCloud 云盘和网盘始终索引", "App data in ~/Library. iCloud Drive and cloud storage are always indexed"),
         "settings.scope.system": ("系统目录", "System Folders"),
         "settings.scope.systemHint": ("/System、/Library、/usr、/private、/opt", "/System, /Library, /usr, /private, /opt"),
-        "settings.excluded": ("排除的文件夹", "Excluded Folders"),
-        "settings.noExcluded": ("还没有排除任何文件夹", "No excluded folders yet"),
-        "settings.addFolder": ("添加文件夹…", "Add Folder…"),
-        "settings.excludedHint": ("这些文件夹和里面的内容不会出现在搜索结果里。改动之后会自动重建索引。", "These folders and their contents never appear in results. The index rebuilds after changes.")
+        "settings.excluded": ("排除的路径", "Excluded Paths"),
+        "settings.noExcluded": ("还没有排除任何路径", "No excluded paths yet"),
+        "settings.addFolder": ("添加路径…", "Add File or Folder…"),
+        "settings.excludedHint": ("这些文件和文件夹不会出现在搜索结果里。改动之后会自动重建索引。", "These files and folders are excluded from results. The index rebuilds after changes.")
     ]
 }

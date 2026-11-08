@@ -28,9 +28,11 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private(set) var syntaxVisible = false
     private var diagnostics: [QueryDiagnostic] = []
     private var snapshotNoAccess = false
+    private var coverageExplanation: CoverageExplanation?
     private let snapshot: Bool
     private let preferences: UserDefaults
     private let queue = DispatchQueue(label: "com.oiloil.find.search", qos: .userInteractive)
+    private let coverageQueue = DispatchQueue(label: "com.oiloil.find.searchCoverage", qos: .utility)
     private let generation = SearchGeneration(), cache = SearchCache()
     private var timer: Timer?
     private var stateView: NSView?
@@ -82,6 +84,16 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     var additionalSources: (() -> [SearchSource])?
     private var sourceCaches: [String: SearchCache] = [:]
     private var sourceCacheStores: [String: ObjectIdentifier] = [:]
+    private var folderScope: String?
+    private var volumeScope: String?
+    private var hiddenOnly = false
+    private var sortingRecent: Bool { !hiddenOnly && folderScope == nil && searchField.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var scopedSources: [SearchSource] {
+        guard let volumeScope else { return searchSources }
+        let sources = searchSources
+        if let source = sources.first(where: { $0.id == volumeScope }) { return [source] }
+        return Array(sources.filter { $0.displayName == volumeScope }.prefix(1))
+    }
     private var searchSources: [SearchSource] {
         let primary = manager?.store.map { SearchSource(id: "startup", displayName: "", isOnline: true, store: $0) }
         return primary.map { [$0] + (additionalSources?() ?? []) } ?? (additionalSources?() ?? [])
@@ -132,10 +144,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         searchField.onChange = { [weak self] in self?.setBrowsing(false); self?.startSearch() }
         searchField.onKey = { [weak self] event in self?.handleKey(event) ?? false }
         filters.onChange = { [weak self] in self?.refreshAdditionalFilter(); self?.searchField.focus(); self?.startSearch() }
+        filters.scopeMenu = { [weak self] in self?.makeScopeMenu() ?? NSMenu() }
         filters.onSortChange = { [weak self] in
             guard let self, !self.snapshot else { return }
-            UserDefaults.standard.set(FilterBar.sortName(self.filters.options.sort), forKey: "sortKey")
-            UserDefaults.standard.set(self.filters.options.ascending, forKey: "sortAscending")
+            let recent = self.filters.options.sortsRecentResults
+            self.preferences.set(FilterBar.sortName(self.filters.options.sort), forKey: recent ? "recentSortKey" : "sortKey")
+            self.preferences.set(self.filters.options.ascending, forKey: recent ? "recentSortAscending" : "sortAscending")
         }
         filters.onMenuTracking = { [weak self] tracking in
             self?.menuTracking = tracking
@@ -183,7 +197,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         languageObserver = NotificationCenter.default.addObserver(forName: L10n.changed, object: nil, queue: .main) { [weak self] _ in self?.localize() }
         setState(.indexing)
         if !snapshot {
-            filters.options = SettingsPreferences.searchOptions()
+            filters.options = SettingsPreferences.searchOptions(in: preferences, recent: true)
             timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.refreshProgress() }
         }
         localize()
@@ -243,16 +257,161 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             }
         }
     }
+    func applySearchLink(_ link: SearchLink) {
+        _ = view
+        searchField.text = link.query
+        folderScope = link.folder
+        hiddenOnly = false
+        volumeScope = link.volume.map { value in
+            searchSources.first { $0.id == value || $0.displayName == value }?.id ?? value
+        }
+        filters.select(link.kind, notify: false)
+        scopeChanged()
+    }
+
+    private func makeScopeMenu() -> NSMenu {
+        let menu = NSMenu()
+        func add(_ title: String, _ sourceID: String?, checked: Bool) {
+            let item = NSMenuItem(title: title, action: #selector(selectVolume(_:)), keyEquivalent: "")
+            item.target = self; item.representedObject = sourceID; item.state = checked ? .on : .off
+            menu.addItem(item)
+        }
+        add(L10n.text("scope.allVolumes"), nil, checked: volumeScope == nil)
+        for source in searchSources {
+            add(source.id == "startup" ? L10n.text("scope.startup") : source.displayName,
+                source.id, checked: volumeScope != nil && scopedSources.first?.id == source.id)
+        }
+        if let folderScope {
+            menu.addItem(.separator())
+            let clear = NSMenuItem(title: L10n.text("scope.clearFolder", (folderScope as NSString).lastPathComponent),
+                                   action: #selector(clearFolderScope), keyEquivalent: "")
+            clear.target = self
+            clear.toolTip = folderScope
+            menu.addItem(clear)
+        }
+        menu.addItem(.separator())
+        let hidden = menu.addItem(withTitle: L10n.text("scope.hiddenOnly"), action: #selector(toggleHiddenOnly), keyEquivalent: "")
+        hidden.target = self
+        hidden.state = hiddenOnly ? .on : .off
+        let quick = menu.addItem(withTitle: L10n.text("quickFilter.title"), action: nil, keyEquivalent: "")
+        quick.submenu = makeQuickFilterMenu()
+        return menu
+    }
+
+    private func makeQuickFilterMenu() -> NSMenu {
+        let menu = NSMenu()
+        let saved = QuickFilter.load(from: preferences)
+        let remove = NSMenu()
+        for (index, filter) in saved.enumerated() {
+            let item = menu.addItem(withTitle: filter.name, action: #selector(applyQuickFilterItem(_:)), keyEquivalent: index < 9 ? String(index + 1) : "")
+            item.keyEquivalentModifierMask = [.control, .option]
+            item.target = self; item.tag = index
+            let deletion = remove.addItem(withTitle: filter.name, action: #selector(removeQuickFilter(_:)), keyEquivalent: "")
+            deletion.target = self; deletion.tag = index
+        }
+        if !saved.isEmpty { menu.addItem(.separator()) }
+        let save = menu.addItem(withTitle: L10n.text("quickFilter.save"), action: #selector(saveQuickFilter), keyEquivalent: "")
+        save.target = self
+        if !saved.isEmpty {
+            let item = menu.addItem(withTitle: L10n.text("quickFilter.remove"), action: nil, keyEquivalent: "")
+            item.submenu = remove
+        }
+        return menu
+    }
+
+    @objc private func toggleHiddenOnly() {
+        hiddenOnly.toggle()
+        scopeChanged()
+    }
+
+    @objc private func applyQuickFilterItem(_ item: NSMenuItem) {
+        _ = applyQuickFilter(at: item.tag)
+    }
+
+    private func applyQuickFilter(at index: Int) -> Bool {
+        let saved = QuickFilter.load(from: preferences)
+        guard saved.indices.contains(index) else { return false }
+        let filter = saved[index]
+        searchField.text = filter.query
+        folderScope = filter.folder
+        volumeScope = filter.volume
+        hiddenOnly = filter.hiddenOnly
+        filters.select(Int(filter.kind ?? 0), notify: false)
+        scopeChanged()
+        return true
+    }
+
+    @objc private func removeQuickFilter(_ item: NSMenuItem) {
+        var saved = QuickFilter.load(from: preferences)
+        guard saved.indices.contains(item.tag) else { return }
+        saved.remove(at: item.tag)
+        QuickFilter.save(saved, to: preferences)
+    }
+
+    @objc private func saveQuickFilter() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.view.window?.isVisible == true else { return }
+            self.rememberFocus()
+            self.menuTracking = true
+            defer { self.menuTracking = false; self.restoreFocus() }
+            let alert = NSAlert()
+            alert.messageText = L10n.text("quickFilter.saveTitle")
+            alert.addButton(withTitle: L10n.text("quickFilter.saveButton"))
+            alert.addButton(withTitle: L10n.text("quickFilter.cancel"))
+            let name = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+            name.placeholderString = L10n.text("quickFilter.name")
+            name.setAccessibilityLabel(L10n.text("quickFilter.name"))
+            alert.accessoryView = name
+            alert.window.initialFirstResponder = name
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            let title = name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return }
+            let filter = QuickFilter(name: title, query: self.searchField.text, kind: self.filters.options.kind,
+                                     folder: self.folderScope, volume: self.volumeScope, hiddenOnly: self.hiddenOnly)
+            var saved = QuickFilter.load(from: self.preferences)
+            if let index = saved.firstIndex(where: { $0.name.caseInsensitiveCompare(title) == .orderedSame }) { saved[index] = filter }
+            else { saved.append(filter) }
+            QuickFilter.save(saved, to: self.preferences)
+        }
+    }
+
+    @objc private func selectVolume(_ item: NSMenuItem) {
+        volumeScope = item.representedObject as? String
+        scopeChanged()
+    }
+
+    @objc private func clearFolderScope() {
+        folderScope = nil
+        scopeChanged()
+    }
+
+    @objc private func scopeToSelection() {
+        guard let item = results.selectedItem, !multipleSelected else { return }
+        folderScope = item.flags & SiftFlag.dir != 0 ? item.path : item.parentPath
+        searchField.text = ""
+        scopeChanged()
+    }
+
+    private func scopeChanged() {
+        filters.scopeActive = folderScope != nil || volumeScope != nil || hiddenOnly
+        if filters.additionalSelected { filters.select(0, notify: false) }
+        refreshAdditionalFilter()
+        setBrowsing(false)
+        searchField.focus()
+        startSearch()
+    }
+
     func panelWillShow() {
         additionalSearchProvider?.visibilityChanged(true)
         setBrowsing(false)
         supplementaryProvider?.userActivity(visible: true, typing: false)
-        let currentQuery = Query.parse(searchField.text, store: manager?.store)
-        let sources = searchSources
+        let sources = scopedSources
+        let currentQuery = editingQuery(store: sources.first?.store)
         if additionalSearchProvider?.isEnabled != true { additionalPending = false }
         if additionalSearchProvider?.isEnabled != true, let result = results.result, result.isCurrent(sources),
            (result.single != nil || result.multiple != nil || sources.isEmpty),
-           result.query.raw == currentQuery.raw, !currentQuery.isTimeDependent,
+           result.query.raw == currentQuery.raw, result.query.folderScope == currentQuery.folderScope,
+           result.query.hiddenOnly == currentQuery.hiddenOnly, !currentQuery.isTimeDependent,
            Date().timeIntervalSince(result.createdAt) <= 600 { return }
         startSearch(preserveSelection: true)
     }
@@ -295,15 +454,21 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private func search(refresh: Bool, preserveSelection: Bool) {
         supplementaryProvider?.userActivity(visible: view.window?.isVisible == true, typing: !refresh && !preserveSelection)
         let token = generation.next()
-        let sources = filters.additionalSelected ? [] : searchSources
+        let additionalOnly = filters.additionalSelected
+        let sources = additionalOnly ? [] : scopedSources
+        if !snapshot && filters.options.sortsRecentResults != sortingRecent {
+            var options = SettingsPreferences.searchOptions(in: preferences, recent: sortingRecent)
+            options.kind = filters.options.kind
+            filters.options = options
+        }
         let store = sources.first?.store
         var options = filters.options
         if !snapshot { options.pinyin = UserDefaults.standard.bool(forKey: "pinyinEnabled") }
         let query = editingQuery(store: store), previous = results.result
         let cancelled = { [generation] in !generation.current(token) }
-        let supplementary = filters.additionalSelected ? nil : supplementaryProvider?.prepareSearch(query, options: options, sources: sources, isCancelled: cancelled)
+        let supplementary = additionalOnly ? nil : supplementaryProvider?.prepareSearch(query, options: options, sources: sources, isCancelled: cancelled)
         let additional = additionalSearchProvider.flatMap { provider in
-            provider.isEnabled && (filters.additionalSelected || options.kind == nil) ? provider.prepareSearch(query, isCancelled: cancelled) : nil
+            provider.isEnabled && (additionalOnly || options.kind == nil && folderScope == nil && volumeScope == nil && !hiddenOnly) ? provider.prepareSearch(query, isCancelled: cancelled) : nil
         }
         additionalSearchFailed = false
         additionalPending = !refresh && additional != nil
@@ -311,7 +476,13 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             pendingNewSearch = nil
             results.clear(preservingViewport: true)
             setState(manager != nil && manager?.store == nil ? .indexing : .empty)
-            footer.text = L10n.text("footer.results", Presentation.countText(0), Presentation.elapsedText(0))
+            if let volumeScope {
+                footer.warning = true
+                footer.text = L10n.text("scope.unavailable", volumeScope)
+            } else {
+                footer.warning = false
+                footer.text = L10n.text("footer.results", Presentation.countText(0), Presentation.elapsedText(0))
+            }
             refreshProgress(); return
         }
         refreshProgress()
@@ -399,10 +570,15 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         resultDidChange(result)
     }
     private func editingQuery(store: IndexStore?) -> Query {
-        Query.parse(searchField.text, store: store, editingRange: searchField.input.currentEditor() == nil ? nil : searchField.editor.selectedRange(), isComposing: searchField.editor.hasMarkedText(), pathExists: { [self] path in
+        var query = Query.parse(searchField.text, store: store, editingRange: searchField.input.currentEditor() == nil ? nil : searchField.editor.selectedRange(), isComposing: searchField.editor.hasMarkedText(), pathExists: { [self] path in
             if searchSources.contains(where: { source in source.store.read { source.store.containsPath(path) } }) { return true }
             var info = stat(); return path.withCString { stat($0, &info) == 0 }
         })
+        if !filters.additionalSelected {
+            if let folderScope { query = query.restricted(toFolder: folderScope) }
+            if hiddenOnly { query = query.showingOnlyHiddenFiles() }
+        }
+        return query
     }
     private func refreshDiagnostics() {
         let query = editingQuery(store: manager?.store ?? results.result?.store)
@@ -411,7 +587,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         configureEmpty(result); updateFooter(result)
     }
     private func configureEmpty(_ result: SearchPresentation) {
-        empty.configure(diagnostic: diagnostics.first, hasNoAccess: snapshotNoAccess || (!Permissions.hasFullDiskAccess() && result.sources.contains { source in source.store.read { source.store.coverage[.noAccess].count > 0 } }))
+        empty.configure(diagnostic: diagnostics.first, hasNoAccess: snapshotNoAccess || (!Permissions.hasFullDiskAccess() && result.sources.contains { source in source.store.read { source.store.coverage[.noAccess].count > 0 } }),
+                        explanation: coverageExplanation)
     }
     func toggleSyntax(_ show: Bool? = nil) {
         let visible = show ?? !syntaxVisible
@@ -428,11 +605,46 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
     }
     private func resultDidChange(_ result: SearchPresentation) {
+        coverageExplanation = nil
         configureEmpty(result)
+        explainEmptyResult(result)
         setState(result.total == 0 ? .empty : nil)
         updateFooter(result)
         refreshProgress()
     }
+    private var explicitPath: String? {
+        let text = searchField.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let unquoted = text.count >= 2 && (text.first == "'" || text.first == "\u{22}") && text.last == text.first
+            ? String(text.dropFirst().dropLast()) : text
+        let path: String
+        if unquoted.lowercased().hasPrefix("file:") {
+            guard let url = URL(string: unquoted), url.isFileURL, url.host == nil || url.host == "" || url.host == "localhost" else { return nil }
+            path = url.path
+        } else {
+            // Preserve literal names first; paste normalization also accepts escaped paths.
+            let normalized = text.hasPrefix("/") || text.hasPrefix("~/") ? text : Query.normalizePaste(text)
+            path = NSString(string: normalized).expandingTildeInPath
+        }
+        guard path.hasPrefix("/"), !path.contains("\0"), !path.contains("\n"), !path.contains("\r") else { return nil }
+        return path
+    }
+
+    private func explainEmptyResult(_ result: SearchPresentation) {
+        guard !snapshot, result.total == 0, diagnostics.isEmpty, !filters.additionalSelected,
+              folderScope == nil, volumeScope == nil, !hiddenOnly, let path = explicitPath else { return }
+        let sources = searchSources.filter { $0.id != "startup" }
+        let manager = manager
+        coverageQueue.async { [weak self, weak result] in
+            guard result != nil else { return }
+            let answer = sources.lazy.compactMap { $0.explain(path: path) }.first ?? manager?.explain(path: path)
+            DispatchQueue.main.async { [weak self, weak result] in
+                guard let self, let result, self.results.result === result, self.explicitPath == path else { return }
+                self.coverageExplanation = answer
+                self.configureEmpty(result)
+            }
+        }
+    }
+
     private func updateFooter(_ result: SearchPresentation) {
         footer.warning = !diagnostics.isEmpty
         if let diagnostic = diagnostics.first { footer.text = L10n.diagnostic(diagnostic); return }
@@ -509,6 +721,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let command = flags.contains(.command), option = flags.contains(.option)
         if searchField.editor.hasMarkedText() { return false }
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        if flags.intersection([.command, .control, .option, .shift]) == [.control, .option],
+           let slot = Int(key), (1...9).contains(slot), !event.isARepeat,
+           applyQuickFilter(at: slot - 1) { return true }
         // A nonactivating panel has no Edit menu to dispatch text shortcuts.
         if flags.intersection([.command, .control, .option, .shift]) == .command,
            let editor = searchField.input.currentEditor() {
@@ -543,7 +758,13 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         case 125: if command { results.select((results.result?.count ?? 1) - 1, repeatKey: event.isARepeat) } else { results.move(1, repeatKey: event.isARepeat) }; return true
         case 116: results.page(-1, repeatKey: event.isARepeat); return true
         case 121: results.page(1, repeatKey: event.isARepeat); return true
-        case 36, 76: if command { revealSelected() } else { openSelected() }; return true
+        case 36, 76:
+            if command { revealSelected() }
+            else if !browsingResults && !option && !filters.additionalSelected, let path = explicitPath {
+                if !event.isARepeat { openExplicitPath(path) }
+            }
+            else { openSelected() }
+            return true
         case 48: filters.cycle(flags.contains(.shift) ? -1 : 1); return true
         case 53: if quickLook.isVisible { quickLook.close() } else { hidePanel?() }; return true
         case 51 where command: trashSelected(); return true
@@ -565,6 +786,30 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         default: return false
         }
     }
+    private func openExplicitPath(_ path: String) {
+        let text = searchField.text
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let alternate = NSString(string: Query.normalizePaste(text)).expandingTildeInPath
+            let target = [path, alternate].first { $0.hasPrefix("/") && FileManager.default.fileExists(atPath: $0) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.searchField.text == text, self.view.window?.isVisible == true,
+                      (self.view.window as? SearchPanel)?.hiding != true else { return }
+                guard let target else {
+                    self.footer.warning = true
+                    self.footer.text = L10n.text("path.unavailable")
+                    return
+                }
+                NSWorkspace.shared.open(URL(fileURLWithPath: target), configuration: .init()) { [weak self] _, error in
+                    DispatchQueue.main.async {
+                        guard let self, self.searchField.text == text else { return }
+                        if error == nil { self.hidePanel?() }
+                        else { self.footer.warning = true; self.footer.text = L10n.text("path.unavailable") }
+                    }
+                }
+            }
+        }
+    }
+
     private func openSelected() {
         if let item = results.selectedAdditional { performAdditional(item, kind: .open); return }
         if multipleSelected { openMultiple(); return }
@@ -756,8 +1001,67 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             if i == 7 { item.isEnabled = results.selectedItem?.source.isOnline == true }
             menu.addItem(item)
         }
+        if results.selectedItem != nil && !multipleSelected {
+            menu.insertItem(.separator(), at: 3)
+            let scope = NSMenuItem(title: L10n.text("scope.inFolder"), action: #selector(scopeToSelection), keyEquivalent: "")
+            scope.target = self
+            menu.insertItem(scope, at: 4)
+            let openWith = NSMenuItem(title: L10n.text("ctx.openWith"), action: #selector(chooseApplication), keyEquivalent: "")
+            openWith.target = self
+            menu.insertItem(openWith, at: 1)
+        }
+        if results.selectedItem != nil {
+            let exclude = NSMenuItem(title: L10n.text("ctx.exclude"), action: #selector(excludeSelected), keyEquivalent: "")
+            exclude.target = self
+            menu.insertItem(exclude, at: max(0, menu.items.count - 1))
+        }
         return menu
     }
+    @objc private func excludeSelected() {
+        guard !snapshot, stateView == nil else { return }
+        let paths = results.selectedItems.filter { $0.path != $0.source.store.rootPath }.map(\.path)
+        guard !paths.isEmpty else { return }
+        let previous = preferences.stringArray(forKey: "userExcludedPaths") ?? []
+        let updated = ExcludedFolders.adding(paths, to: previous)
+        guard updated != previous else { return }
+        SettingsPreferences.setExcludedPaths(updated, in: preferences)
+        footer.warning = false
+        footer.text = L10n.text("scope.exclusionSaved")
+    }
+    @objc private func chooseApplication() {
+        guard let file = selectedURL, !multipleSelected, allowOnlineAction() else { return }
+        let location = view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let applications = NSWorkspace.shared.urlsForApplications(toOpen: file).map { url in
+                (url, FileManager.default.displayName(atPath: url.path))
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.view.window?.isKeyWindow == true, self.selectedURL == file,
+                      self.allowOnlineAction() else { return }
+                let menu = NSMenu()
+                menu.delegate = self
+                if applications.isEmpty {
+                    menu.addItem(withTitle: L10n.text("ctx.noApplications"), action: nil, keyEquivalent: "")
+                }
+                for (url, name) in applications {
+                    let item = menu.addItem(withTitle: name, action: #selector(self.openWithApplication(_:)), keyEquivalent: "")
+                    item.target = self; item.representedObject = [file, url]
+                }
+                menu.popUp(positioning: nil, at: location, in: self.view)
+            }
+        }
+    }
+
+    @objc private func openWithApplication(_ item: NSMenuItem) {
+        guard let urls = item.representedObject as? [URL], urls.count == 2, selectedURL == urls[0], allowOnlineAction() else { return }
+        NSWorkspace.shared.open([urls[0]], withApplicationAt: urls[1], configuration: .init()) { [weak self] _, error in
+            DispatchQueue.main.async {
+                if error == nil { self?.hidePanel?() }
+                else { NSSound.beep() }
+            }
+        }
+    }
+
     @objc private func contextAction(_ item: NSMenuItem) {
         switch item.tag { case 0: openSelected(); case 1: revealSelected(); case 2: previewSelected(); case 4: copyPath(); case 5: copyName(); case 7: trashSelected(); default: break }
     }

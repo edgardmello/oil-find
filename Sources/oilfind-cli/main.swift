@@ -68,7 +68,7 @@ func typing(_ text: String, in store: IndexStore, useCache: Bool = true, output:
     for prefix in prefixes.dropLast().reversed() { _ = step(prefix) }
     return (finalCount, maximum)
 }
-guard let command = args.first else { fputs("usage: oilfind-cli scan|stats|search|typing|bench|watch|m2-bench|multi-bench\n", stderr); exit(2) }
+guard let command = args.first else { fputs("usage: oilfind-cli scan|stats|search|explain|typing|bench|watch|m2-bench|multi-bench\n", stderr); exit(2) }
 switch command {
 case "multi-bench":
     multiBenchmark(db: db, args: args)
@@ -150,6 +150,29 @@ case "scan":
     let store = IndexStore(scan: output, config: config)
     do { try store.save(to: db) } catch { fputs("save failed: \(error)\n", stderr); exit(1) }
     report(store, scanSeconds: output.elapsed)
+case "explain":
+    guard args.count > 1, let path = ExcludedFolders.normalized(NSString(string: args[1]).expandingTildeInPath) else {
+        fputs("usage: oilfind-cli explain PATH [--db INDEX] [--limited] [--full]\n", stderr)
+        exit(2)
+    }
+    let appDB = NSHomeDirectory() + "/Library/Application Support/Oil Find/index.oilfind"
+    let indexPath = option("--db", fallback: FileManager.default.fileExists(atPath: appDB) ? appDB : db)
+    guard let store = IndexStore.load(from: indexPath) else { fputs("cannot load \(indexPath)\n", stderr); exit(1) }
+    let defaults = UserDefaults(suiteName: "com.oiloil.find") ?? .standard
+    var config = SettingsPreferences.indexConfig(limited: args.contains("--limited") || defaults.bool(forKey: "skippedFullDiskAccess"), in: defaults)
+    config.rootPath = store.rootPath
+    fullScope(&config)
+    switch Coverage.explain(path: path, config: config, store: store) {
+    case .indexed: print("Indexed")
+    case .scope(let reason): print("Excluded by scope: \(reason.rawValue)")
+    case .userExcluded(let folder): print("Excluded by folder rule: \(folder)")
+    case .fileType(let ext): print("Excluded by file type: .\(ext)")
+    case .noAccess: print("The containing folder cannot be read")
+    case .volume: print("Outside the indexed volume")
+    case .cloud: print("In a cloud-only folder")
+    case .missing: print("The path does not exist")
+    case .pending: print("Missing from the index")
+    }
 case "stats", "search", "typing", "bench":
     let start = CFAbsoluteTimeGetCurrent()
     guard let store = IndexStore.load(from: db) else { fputs("cannot load \(db)\n", stderr); exit(1) }

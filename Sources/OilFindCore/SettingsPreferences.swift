@@ -2,6 +2,13 @@ import Foundation
 
 public enum SettingsPreferences {
     public static let excludedExtensionsChanged = Notification.Name("com.oiloil.find.excludedExtensionsChanged")
+    public static let excludedPathsChanged = Notification.Name("com.oiloil.find.excludedPathsChanged")
+    public static func setExcludedPaths(_ paths: [String], in defaults: UserDefaults = .standard) {
+        let normalized = ExcludedFolders.adding(paths, to: [])
+        guard normalized != (defaults.stringArray(forKey: "userExcludedPaths") ?? []) else { return }
+        defaults.set(normalized, forKey: "userExcludedPaths")
+        NotificationCenter.default.post(name: excludedPathsChanged, object: defaults, userInfo: ["paths": normalized])
+    }
     public static func setExcludedExtensions(_ text: String, in defaults: UserDefaults = .standard) -> String {
         let values = IndexConfig.normalizeExtensions(text)
         let previous = defaults.stringArray(forKey: "excludedExtensions") ?? []
@@ -19,15 +26,17 @@ public enum SettingsPreferences {
             "sortKey": "relevance", "sortAscending": false
         ])
     }
-    public static func searchOptions(in defaults: UserDefaults = .standard) -> SearchOptions {
+    public static func searchOptions(in defaults: UserDefaults = .standard, recent: Bool = false) -> SearchOptions {
         let key: SortKey
-        switch defaults.string(forKey: "sortKey") {
+        switch defaults.string(forKey: recent ? "recentSortKey" : "sortKey") {
         case "name": key = .name
         case "modified": key = .modified
         case "size": key = .size
-        default: key = .relevance
+        default: key = recent ? .modified : .relevance
         }
-        return SearchOptions(sort: key, ascending: defaults.bool(forKey: "sortAscending"), pinyin: defaults.bool(forKey: "pinyinEnabled"))
+        var options = SearchOptions(sort: key, ascending: defaults.bool(forKey: recent ? "recentSortAscending" : "sortAscending"), pinyin: defaults.bool(forKey: "pinyinEnabled"))
+        options.sortsRecentResults = recent
+        return options
     }
     public static func indexConfig(limited: Bool, in defaults: UserDefaults = .standard) -> IndexConfig {
         var config = IndexConfig.standard(limited: limited)

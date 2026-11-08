@@ -97,15 +97,13 @@ public final class OilFindProExtension: ApplicationExtension {
         var result: [SearchSource] = []
         for (_, entry) in offlineManagers.sorted(by: { $0.key < $1.key }) {
             guard let store = entry.manager.store else { continue }
-            let standard = IndexConfig.standard()
-            let config = IndexConfig(rootPath: store.rootPath, excludedNames: standard.excludedNames)
             result.append(
                 SearchSource(
                     id: entry.info.id,
                     displayName: entry.info.name,
                     isOnline: false,
                     store: store,
-                    explainPath: { Coverage.explain(path: $0, config: config, store: store) }
+                    explainPath: entry.manager.explain(path:)
                 )
             )
         }

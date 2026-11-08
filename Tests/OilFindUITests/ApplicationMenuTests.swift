@@ -33,7 +33,8 @@ final class ApplicationMenuTests: XCTestCase {
         XCTAssertEqual(first.items.map(\.title), second.items.map(\.title))
         XCTAssertEqual(first.items.map(\.isHidden), second.items.map(\.isHidden))
         let settings = first.items.firstIndex { $0.action == #selector(AppDelegate.showSettings) }!
-        XCTAssertEqual(first.items[settings + 1].title, L10n.text("update.check"))
+        XCTAssertTrue(first.items[settings + 1].isSeparatorItem)
+        XCTAssertFalse(first.items.contains { $0.title == L10n.text("update.check") })
     }
 
     func testItemPlacementActionAndImmediateVisibilityUpdates() throws {

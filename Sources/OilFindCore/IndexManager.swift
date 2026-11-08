@@ -6,7 +6,7 @@ public final class IndexManager {
     public enum State { case idle, loading, scanning, ready }
     // The requested config belongs to eventQueue; each scan captures its own value.
     private var config: IndexConfig
-    private var settingsObserver: NSObjectProtocol?
+    private var settingsObservers: [NSObjectProtocol] = []
     private let settingsDefaults: UserDefaults?
     private var offline = false
     private let dbURL: URL
@@ -44,9 +44,12 @@ public final class IndexManager {
         self.config = config; self.dbURL = dbURL; self.volumeUUID = volumeUUID
         self.settingsDefaults = settingsDefaults
         if let values = settingsDefaults?.stringArray(forKey: "excludedExtensions") { self.config.excludedExtensions = Set(values) }
+        if let paths = settingsDefaults?.stringArray(forKey: "userExcludedPaths"), config.userExcludedPaths.isEmpty {
+            self.config.userExcludedPaths = Self.relevantExclusions(paths, root: config.rootPath)
+        }
         eventQueue.setSpecific(key: eventKey, value: true); saveQueue.setSpecific(key: saveKey, value: true)
         if let settingsDefaults {
-            settingsObserver = NotificationCenter.default.addObserver(forName: SettingsPreferences.excludedExtensionsChanged, object: settingsDefaults, queue: nil) { [weak self] notification in
+            settingsObservers.append(NotificationCenter.default.addObserver(forName: SettingsPreferences.excludedExtensionsChanged, object: settingsDefaults, queue: nil) { [weak self] notification in
                 guard let extensions = notification.userInfo?["extensions"] as? Set<String> else { return }
                 self?.eventQueue.async { [weak self] in
                     guard let self, self.config.excludedExtensions != extensions else { return }
@@ -54,10 +57,25 @@ public final class IndexManager {
                     if self.locked({ self.offline }) { self.reloadOffline() }
                     else { self.beginRescan() }
                 }
-            }
+            })
+            settingsObservers.append(NotificationCenter.default.addObserver(forName: SettingsPreferences.excludedPathsChanged, object: settingsDefaults, queue: nil) { [weak self] notification in
+                guard let paths = notification.userInfo?["paths"] as? [String] else { return }
+                self?.eventQueue.async { [weak self] in
+                    guard let self else { return }
+                    let relevant = Self.relevantExclusions(paths, root: self.config.rootPath)
+                    guard self.config.userExcludedPaths != relevant else { return }
+                    self.config.userExcludedPaths = relevant
+                    if self.locked({ self.offline }) { self.reloadOffline() }
+                    else { self.beginRescan() }
+                }
+            })
         }
     }
-    deinit { if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) }; timer?.cancel(); pendingNotification?.cancel(); currentScanner?.cancel() }
+    private static func relevantExclusions(_ paths: [String], root: String) -> [String] {
+        if root == "/" { return paths }
+        return paths.filter { ExcludedFolders.contains(root, path: $0) || ExcludedFolders.contains($0, path: root) }
+    }
+    deinit { settingsObservers.forEach(NotificationCenter.default.removeObserver); timer?.cancel(); pendingNotification?.cancel(); currentScanner?.cancel() }
     private func locked<T>(_ body: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return body() }
     public var state: State { locked { currentState } }
     public var store: IndexStore? { locked { currentStore } }
@@ -106,6 +124,7 @@ public final class IndexManager {
     }
     private func scopeFingerprint(_ config: IndexConfig) -> UInt64 {
         var scope = config; scope.excludedExtensions = []
+        scope.userExcludedPaths = []
         return fingerprint(scope)
     }
     private func reloadOffline() {
@@ -126,6 +145,23 @@ public final class IndexManager {
                 }
                 if self.volumeUUID != nil { loaded.rebase(to: config.rootPath) }
                 // Filter a fresh catalog in memory; retain the on-disk snapshot for undo and reconnect.
+                if !config.userExcludedPaths.isEmpty {
+                    loaded.write {
+                        var bucket = loaded.coverage[.userExcluded]
+                        for path in config.userExcludedPaths {
+                            if ExcludedFolders.contains(path, path: loaded.rootPath) {
+                                for i in 1..<loaded.count where loaded.isLive(UInt32(i)) { loaded.remove(UInt32(i)) }
+                            } else if let id = loaded.indexedID(forPath: path), id != 0 {
+                                loaded.remove(id)
+                            } else { continue }
+                            bucket.count &+= 1
+                            if bucket.examples.count < 5 { bucket.examples.append(path) }
+                        }
+                        loaded.sweep()
+                        loaded.coverage.buckets[.userExcluded] = bucket
+                        loaded.version &+= 1
+                    }
+                }
                 if config.hasExcludedExtensions {
                     loaded.write {
                         var bucket = loaded.coverage[.fileType], changed = false

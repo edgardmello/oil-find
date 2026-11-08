@@ -27,8 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hotKey: HotKey?
     private var manager: IndexManager?
     private var settingsController: SettingsWindowController?
-    private var updateItem: NSMenuItem?, checkUpdateItem: NSMenuItem?, quitItem: NSMenuItem?
     private var secondaryInstance = false
+    private var pendingSearchLink: SearchLink?
     private var openItem: NSMenuItem?, hotKeyFailureItem: NSMenuItem?
     private var permissionTimer: Timer?
     private var welcomeController: WelcomeWindowController?
@@ -47,8 +47,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { NSApp.terminate(nil) }
             return
         }
-        UpdateManager.shared.start()
-        UpdateManager.shared.onChange = { [weak self] in self?.refreshUpdateMenu() }
         NSApp.setActivationPolicy(.accessory)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(reopenRequested(_:)), name: Self.showRequest, object: nil)
         let defaults = UserDefaults.standard
@@ -90,9 +88,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         if let limited = indexRequest { startIndex(limited: limited) }
-        if let failure = SystemUpdateFiles().cleanupAfterLaunch(application: Bundle.main.bundleURL, current: UpdateManager.current) {
-            UpdateManager.shared.reportLaunchFailure(failure)
-        }
+        showPendingSearchLink()
+        // Acknowledge launches for older installers and the packaged launch smoke test.
+        SystemUpdateFiles().cleanupAfterLaunch(application: Bundle.main.bundleURL, current: UpdateManager.current)
     }
     private func finishWelcome(source: PanelSource = .welcome) {
         guard welcomeState?.isShowing == true else { return }
@@ -105,7 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         permissionTimer?.invalidate(); permissionTimer = nil
         welcomeController?.finish(); welcomeController = nil
         if let limited = request { startIndex(limited: limited) }
-        panel.show(source: source)
+        if !showPendingSearchLink() { panel.show(source: source) }
     }
     private func refreshFullDiskAccessState() {
         guard limited, Permissions.hasFullDiskAccess() else { return }
@@ -170,10 +168,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginItem = item("menu.loginItem", #selector(toggleLogin))
         settingsItem = item("menu.settings", #selector(showSettings), ",")
         refreshExtensionMenu()
-        checkUpdateItem = item("update.check", #selector(checkUpdates))
-        updateItem = item("update.check", #selector(presentUpdate))
-        refreshUpdateMenu()
-        menu.addItem(.separator()); quitItem = item("menu.quit", #selector(quit), "q")
+        menu.addItem(.separator())
+        _ = item("menu.quit", #selector(quit), "q")
         appExtension?.onSettingsMenuItemChange = { [weak self] in self?.refreshExtensionMenu() }
         if languageObserver == nil {
             languageObserver = NotificationCenter.default.addObserver(forName: L10n.changed, object: nil, queue: .main) { [weak self] _ in
@@ -186,7 +182,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func localizeMenu() {
         for (key, item) in localizedMenuItems { item.title = L10n.text(key) }
         if let menu = statusMenu { menuWillOpen(menu) }
-        refreshUpdateMenu()
     }
     private func registerHotKey(keyCode: UInt32, modifiers: UInt32) -> Bool {
         hotKey?.unregister()
@@ -220,7 +215,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         refreshFullDiskAccessState()
         refreshExtensionMenu()
-        refreshUpdateMenu()
         if let store = manager?.store { countItem?.title = L10n.text("menu.indexed", Presentation.countText(store.read { store.liveCount })) }
         else { countItem?.title = L10n.text("menu.indexing") }
         limitedItem?.isHidden = !limited
@@ -244,16 +238,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         extensionItem?.isHidden = !supplied.isVisible
     }
     @objc private func performExtensionMenuAction() { appExtension?.settingsMenuItem?.action() }
-    private func refreshUpdateMenu() {
-        let update = UpdateManager.shared
-        checkUpdateItem?.isEnabled = update.canCheck
-        updateItem?.isHidden = update.manifest == nil
-        updateItem?.title = update.menuTitle
-        updateItem?.isEnabled = !update.state.busy
-        quitItem?.isEnabled = !update.preventsTermination
-    }
-    @objc private func checkUpdates() { UpdateManager.shared.check() }
-    @objc private func presentUpdate() { UpdateManager.shared.present() }
     @objc private func showSearch() {
         refreshFullDiskAccessState()
         if welcomeState?.isShowing == true { welcomeController?.present() }
@@ -278,12 +262,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginItem?.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
     @objc private func quit() { NSApp.terminate(nil) }
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        UpdateManager.shared.preventsTermination ? .terminateCancel : .terminateNow
-    }
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls { appExtension?.handle(url) }
+        for url in urls {
+            if let link = SearchLink(url) { pendingSearchLink = link }
+            else { appExtension?.handle(url) }
+        }
+        showPendingSearchLink()
     }
-    func applicationWillTerminate(_ notification: Notification) { if !secondaryInstance { topics.stop(); appExtension?.stop(); externalDrives.stop(); UpdateManager.shared.stop() }; settingsController?.model.stopRefreshing(); permissionTimer?.invalidate(); hotKey?.unregister(); manager?.stop() }
+    @discardableResult
+    private func showPendingSearchLink() -> Bool {
+        guard !secondaryInstance, welcomeState?.isShowing == false, let link = pendingSearchLink else { return false }
+        pendingSearchLink = nil
+        panel.show(source: .interaction)
+        panel.searchController.applySearchLink(link)
+        return true
+    }
+    func applicationWillTerminate(_ notification: Notification) { if !secondaryInstance { topics.stop(); appExtension?.stop(); externalDrives.stop() }; settingsController?.model.stopRefreshing(); permissionTimer?.invalidate(); hotKey?.unregister(); manager?.stop() }
     deinit { if let languageObserver { NotificationCenter.default.removeObserver(languageObserver) } }
 }

@@ -12,6 +12,37 @@ final class SearchEditingTests: XCTestCase {
                         isARepeat: false, keyCode: code)!
     }
 
+    func testQuickFilterShortcutRestoresSavedQueryAndKind() throws {
+        _ = NSApplication.shared
+        let suite = "OilFindQuickFilters-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        QuickFilter.save([.init(name: "Hidden documents", query: "invoice", kind: Query.kindValue("doc"),
+                                folder: "/Volumes/Backup/Clients", volume: "Backup", hiddenOnly: true)], to: preferences)
+        let controller = SearchViewController(snapshot: true, preferences: preferences)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: Theme.panelSize), styleMask: .borderless,
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        defer { window.close() }
+        XCTAssertTrue(controller.handleKey(event("1", code: 18, in: window, modifiers: [.control, .option])))
+        XCTAssertEqual(controller.searchField.text, "invoice")
+        XCTAssertEqual(controller.filters.options.kind, Query.kindValue("doc"))
+        XCTAssertTrue(controller.filters.scopeActive)
+        XCTAssertTrue(QuickFilter.load(from: preferences).first?.hiddenOnly == true)
+    }
+
+    func testSearchLinkDecodesQueryAndScopes() throws {
+        let url = try XCTUnwrap(URL(string: "oilfind://search?q=annual%20invoice&filter=Documents&folder=%2FVolumes%2FBackup%2FMy%20Files&volume=Backup"))
+        let link = try XCTUnwrap(SearchLink(url))
+        XCTAssertEqual(link.query, "annual invoice")
+        XCTAssertEqual(link.kind, Int(Query.kindValue("doc")!))
+        XCTAssertEqual(link.folder, "/Volumes/Backup/My Files")
+        XCTAssertEqual(link.volume, "Backup")
+        XCTAssertNil(SearchLink(try XCTUnwrap(URL(string: "oilfind://search?q=one&q=two"))))
+        XCTAssertNil(SearchLink(try XCTUnwrap(URL(string: "oilfind://search?q=one&folder=relative"))))
+    }
+
     func testInlinePreviewShortcutTogglesAndResetsOnHide() {
         _ = NSApplication.shared
         let panel = SearchPanel(snapshot: true)

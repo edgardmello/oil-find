@@ -5,6 +5,27 @@ public struct Query {
     public var clauses: [Clause]
     public var raw: String
     public var diagnostics: [QueryDiagnostic] = []
+    public private(set) var folderScope: String? = nil
+    public func restricted(toFolder path: String) -> Query {
+        var query = self
+        if query.folderScope != nil {
+            query.clauses.removeAll { clause in
+                guard clause.alternatives.count == 1, case .subtree = clause.alternatives[0].matcher else { return false }
+                return true
+            }
+        }
+        query.folderScope = path
+        query.clauses.append(Clause(alternatives: [Atom(negated: false, matcher: .subtree(path))]))
+        return query
+    }
+    public private(set) var hiddenOnly = false
+    public func showingOnlyHiddenFiles() -> Query {
+        guard !hiddenOnly else { return self }
+        var query = self
+        query.hiddenOnly = true
+        query.clauses.append(Clause(alternatives: [Atom(negated: false, matcher: .hidden)]))
+        return query
+    }
     public var isEmpty: Bool { clauses.isEmpty }
     public var isTimeDependent: Bool {
         clauses.contains { clause in
@@ -165,6 +186,8 @@ public struct QueryDiagnostic: Equatable {
 public enum Matcher {
     case name(needle: [UInt8], caseSensitive: Bool)
     case path(components: [[UInt8]])
+    case subtree(String)
+    case hidden
     case glob(pattern: [UInt8], onPath: Bool)
     case regex(NSRegularExpression, onPath: Bool)
     case ext(Set<UInt64>)
