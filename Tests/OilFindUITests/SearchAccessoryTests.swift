@@ -4,6 +4,39 @@ import OilFindCore
 @testable import OilFindApp
 
 final class SearchAccessoryTests: XCTestCase {
+    func testAddingAFileExpandsTheStashWithoutTogglingIt() throws {
+        let app = NSApplication.shared
+        let suite = "OilFindStashExpansion-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data().write(to: root.appendingPathComponent("stash-example.txt"))
+        let config = IndexConfig(rootPath: root.path)
+        let store = IndexStore(scan: try XCTUnwrap(Scanner(config: config, threads: 1).run()), config: config)
+        let controller = SearchViewController(snapshot: false, preferences: preferences)
+        controller.additionalSources = { [SearchSource(id: "startup", displayName: "", isOnline: true, store: store)] }
+        let window = NSWindow(contentRect: NSRect(x: -2000, y: -2000, width: 800, height: 560),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = controller
+        window.orderFrontRegardless()
+        defer { window.close() }
+        try controller.prepareSnapshot(state: "results", query: "stash-example", options: .init(), store: store, selection: 0)
+        let bar = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? SearchAccessoryBar }.first)
+        XCTAssertEqual(bar.desiredHeight, 0)
+
+        XCTAssertTrue(app.sendAction(NSSelectorFromString("stashSelection"), to: controller, from: nil))
+        let deadline = Date().addingTimeInterval(2)
+        while bar.desiredHeight == 0 && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        let stash = try XCTUnwrap(bar.subviews.compactMap { $0 as? InlineStashTable }.first)
+        XCTAssertFalse(stash.isHidden)
+        XCTAssertEqual((stash.documentView as? NSTableView)?.numberOfRows, 1)
+    }
+
     func testApplyingQuickFilterPreservesQueryAndDisplaysRemovableScopes() throws {
         let app = NSApplication.shared
         let suite = "OilFindAccessory-" + UUID().uuidString
