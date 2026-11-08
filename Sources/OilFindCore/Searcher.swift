@@ -7,6 +7,11 @@ public struct SearchOptions {
     public var ascending: Bool = false
     public var kind: UInt8? = nil
     public var pinyin: Bool = true
+    public var sortsRecentResults = false
+    public func effectiveSort(for query: Query) -> (key: SortKey, ascending: Bool) {
+        if query.isEmpty && (!sortsRecentResults || sort == .relevance) { return (.modified, false) }
+        return (sort, ascending)
+    }
     public init(sort: SortKey = .relevance, ascending: Bool = false, kind: UInt8? = nil, pinyin: Bool = true) {
         self.sort = sort; self.ascending = ascending; self.kind = kind; self.pinyin = pinyin
     }
@@ -52,7 +57,7 @@ private struct DriverNeedle {
     var caseSensitive: Bool = false
 }
 private enum AtomTag: UInt8 {
-    case name, path, glob, regex, ext, kind, filesOnly, foldersOnly, fileName, folderName, size, modified, tag
+    case name, path, glob, regex, ext, kind, filesOnly, foldersOnly, fileName, folderName, size, modified, tag, hidden
 }
 private struct ByteSpan {
     var bytes: UnsafePointer<UInt8>?
@@ -116,6 +121,20 @@ private final class SearchPlan {
         source.withUnsafeBufferPointer { pointer.update(from: $0.baseAddress!, count: source.count) }
         ownedKeys.append(pointer)
         return UnsafePointer(pointer)
+    }
+    func subtreeMask(store: IndexStore, path: String) -> UnsafePointer<UInt8> {
+        let inside = UnsafeMutablePointer<UInt8>.allocate(capacity: store.count)
+        inside.initialize(repeating: 0, count: store.count)
+        let rootIsDescendant = path == "/" || store.rootPath.hasPrefix(path + "/")
+        let folder = rootIsDescendant ? 0 : store.indexedID(forPath: path)
+        if let folder, store.flags[Int(folder)] & SiftFlag.dir != 0 {
+            for i in (Int(folder) + 1)..<store.count {
+                let parent = store.parent[i]
+                inside[i] = parent == folder ? 1 : inside[Int(parent)]
+            }
+        }
+        ownedMasks.append(inside)
+        return UnsafePointer(inside)
     }
     func descendantMask(store: IndexStore, components: UnsafePointer<ByteSpan>, count: Int) -> UnsafePointer<UInt8> {
         let inside = UnsafeMutablePointer<UInt8>.allocate(capacity: store.count)
@@ -331,7 +350,8 @@ public enum Searcher {
     private static func recent(_ query: Query, options: SearchOptions, store: IndexStore, started: CFAbsoluteTime, isCancelled: () -> Bool) -> SearchResult? {
         var heap: [Ranked] = []
         heap.reserveCapacity(200)
-        let recentOptions = SearchOptions(sort: .modified)
+        let order = options.effectiveSort(for: query)
+        let recentOptions = SearchOptions(sort: order.key, ascending: order.ascending)
         var start = 1
         while start < store.count {
             if start > 1 && isCancelled() { return nil }
@@ -368,6 +388,8 @@ public enum Searcher {
                     if store.rootPath != "/" && c.count >= rootComponents.count && c.prefix(rootComponents.count).elementsEqual(rootComponents, by: { $0 == $1 }) { normalized = [[]] + c.dropFirst(rootComponents.count) }
                     hot.tag = .path; hot.components = plan.spans(normalized); hot.componentCount = normalized.count
                     if normalized.count >= 2 && normalized.last!.isEmpty { hot.pathMask = plan.descendantMask(store: store, components: hot.components!, count: normalized.count) }
+                case .subtree(let path):
+                    hot.tag = .path; hot.pathMask = plan.subtreeMask(store: store, path: path)
                 case .glob(let p, let onPath): hot.tag = .glob; hot.bytes = plan.bytes(p); hot.length = p.count; hot.flag = onPath
                 case .regex(let r, let onPath):
                     hot.tag = .regex; hot.regexIndex = plan.regexes.count; plan.regexes.append(r); hot.flag = onPath
@@ -390,6 +412,7 @@ public enum Searcher {
                 case .size(let r): hot.tag = .size; hot.lower = r.lowerBound; hot.upper = r.upperBound
                 case .modified(let r): hot.tag = .modified; hot.lower = UInt64(r.lowerBound); hot.upper = UInt64(r.upperBound)
                 case .tag: hot.tag = .tag
+                case .hidden: hot.tag = .hidden
                 }
                 plan.atoms.append(hot)
             }
@@ -735,6 +758,7 @@ public enum Searcher {
             }
         case .path:
             if let mask = atom.pathMask { return AtomMatch(matched: mask[i] != 0, baseScore: 0, needleLength: 0) }
+        case .hidden: return AtomMatch(matched: store.flags[i] & SiftFlag.hidden != 0, baseScore: 0, needleLength: 0)
         case .kind: return AtomMatch(matched: store.kind[i] == UInt8(atom.lower), baseScore: 0, needleLength: 0)
         case .filesOnly: return AtomMatch(matched: store.kind[i] != 1, baseScore: 0, needleLength: 0)
         case .foldersOnly: return AtomMatch(matched: store.kind[i] == 1, baseScore: 0, needleLength: 0)
@@ -805,7 +829,7 @@ public enum Searcher {
         case .foldersOnly: return AtomMatch(matched: store.kind[i] == 1, baseScore: 0, needleLength: 0)
         case .size: let size = store.size(id); return AtomMatch(matched: size >= atom.lower && size <= atom.upper, baseScore: 0, needleLength: 0)
         case .modified: let time = UInt64(store.mtime[i]); return AtomMatch(matched: time >= atom.lower && time <= atom.upper, baseScore: 0, needleLength: 0)
-        case .tag: return AtomMatch(matched: false, baseScore: 0, needleLength: 0)
+        case .tag, .hidden: return AtomMatch(matched: false, baseScore: 0, needleLength: 0)
         }
     }
     private static func matchNameHot(_ name: UnsafeBufferPointer<UInt8>, needle: UnsafeBufferPointer<UInt8>, cs: Bool, ascii: Bool, id: UInt32, pinyin: Bool, store: IndexStore, scratch: SearchScratch, scoreNeeded: Bool) -> (Bool, Int, Int) {

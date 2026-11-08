@@ -14,6 +14,65 @@ final class M26CoreTests: XCTestCase {
         while !condition() && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
         XCTAssertTrue(condition(), file: file, line: line)
     }
+    func testExactFolderScopeAndIndependentRecentSort() throws {
+        let root = try root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        func makeSource(_ name: String, files: [String]) throws -> SearchSource {
+            let directory = root.appendingPathComponent(name)
+            for path in files {
+                let file = directory.appendingPathComponent(path)
+                try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try Data().write(to: file)
+            }
+            let config = IndexConfig(rootPath: directory.path)
+            let store = IndexStore(scan: try XCTUnwrap(Scanner(config: config, threads: 1).run()), config: config)
+            store.write {
+                for i in 1..<store.count { store.flags[i] |= SiftFlag.userArea }
+            }
+            return SearchSource(id: name, displayName: name, isOnline: true, store: store)
+        }
+        let first = try makeSource("First", files: ["Work/Invoice A.pdf", "Work/Invoice A.png", "Other/Work/Invoice B.pdf"])
+        let second = try makeSource("Second", files: ["Work/Invoice C.pdf"])
+        let query = Query.parse("invoice").restricted(toFolder: root.appendingPathComponent("First/Work").path)
+        let filtered = try XCTUnwrap(MultiSearcher.search(query, options: .init(kind: Query.kindValue("doc")), in: [first, second]))
+        XCTAssertEqual(filtered.items.count, 1)
+        let hit = try XCTUnwrap(filtered.items.first)
+        let store = filtered.sources[hit.sourceIndex].store
+        XCTAssertEqual(store.read { store.name(hit.entryID) }, "Invoice A.pdf")
+
+        var options = SearchOptions(sort: .name, ascending: false)
+        options.sortsRecentResults = true
+        let recent = try XCTUnwrap(MultiSearcher.search(.parse(""), options: options, in: [first, second]))
+        let names = recent.items.map { hit in
+            let store = recent.sources[hit.sourceIndex].store
+            return store.read { store.name(hit.entryID) }
+        }
+        XCTAssertEqual(names, ["Invoice C.pdf", "Invoice B.pdf", "Invoice A.png", "Invoice A.pdf"])
+        XCTAssertEqual(Coverage.explain(path: root.appendingPathComponent("First/missing.pdf").path,
+                                        config: .init(rootPath: first.store.rootPath), store: first.store), .missing)
+    }
+
+    func testHiddenSearchUsesIndexedFlagsAndSeparateCacheEntries() throws {
+        let root = try root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in [".secret.txt", "visible-secret.txt"] {
+            try Data().write(to: root.appendingPathComponent(name))
+        }
+        let config = IndexConfig(rootPath: root.path)
+        let store = IndexStore(scan: try XCTUnwrap(Scanner(config: config, threads: 1).run()), config: config)
+        let query = Query.parse("secret")
+        let all = try XCTUnwrap(Searcher.search(query, in: store))
+        XCTAssertEqual(all.items.count, 2)
+        let cache = SearchCache()
+        cache.insert(all)
+        let hidden = query.showingOnlyHiddenFiles()
+        XCTAssertNil(cache.lookup(query: hidden, options: .init(), store: store))
+        let filtered = try XCTUnwrap(Searcher.search(hidden, in: store, previous: all))
+        XCTAssertEqual(filtered.items.map { id in store.read { store.name(id) } }, [".secret.txt"])
+        let hiddenWithNoText = try XCTUnwrap(Searcher.search(Query.parse("").showingOnlyHiddenFiles(), in: store))
+        XCTAssertEqual(hiddenWithNoText.items, filtered.items)
+    }
+
     func testScanExtensionRulesAndCoverage() throws {
         let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
         for name in ["a.log", "b.LOG", "many.parts.Js", "plain", "last.", "a.log.txt", "long.longextension", "bundle.pages"] {
@@ -89,6 +148,11 @@ final class M26CoreTests: XCTestCase {
             XCTAssertFalse(store.read { store.containsPath(store.rootPath + "/skip.LOG") })
             XCTAssertEqual(manager.explain(path: store.rootPath + "/skip.LOG"), .fileType("log"))
         }
+        let selected = root.appendingPathComponent("one/keep.txt").path
+        SettingsPreferences.setExcludedPaths([selected], in: defaults)
+        wait { managers[0].store.map { store in store.read { !store.containsPath(selected) } } == true }
+        XCTAssertEqual(managers[0].explain(path: selected), .userExcluded(selected))
+        XCTAssertTrue(contains("keep.txt", root: root.appendingPathComponent("two"), store: try XCTUnwrap(managers[1].store)))
     }
     func testOfflineFilteringIsReversibleAndNeverOverwritesCatalog() throws {
         let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
@@ -111,6 +175,16 @@ final class M26CoreTests: XCTestCase {
         XCTAssertFalse(manager.isRescanning)
         _ = SettingsPreferences.setExcludedExtensions("", in: defaults)
         wait { manager.state == .ready && manager.store?.read { manager.store!.containsPath(root.appendingPathComponent("skip.log").path) } == true }
+        let path = root.appendingPathComponent("keep.txt").path
+        let beforePathExclusion = try XCTUnwrap(manager.store)
+        SettingsPreferences.setExcludedPaths([path], in: defaults)
+        wait { manager.state == .ready && manager.store !== beforePathExclusion }
+        XCTAssertFalse(contains("keep.txt", root: root, store: try XCTUnwrap(manager.store)))
+        XCTAssertEqual(manager.explain(path: path), .userExcluded(path))
+        let excludedStore = try XCTUnwrap(manager.store)
+        SettingsPreferences.setExcludedPaths([], in: defaults)
+        wait { manager.state == .ready && manager.store !== excludedStore }
+        XCTAssertTrue(contains("keep.txt", root: root, store: try XCTUnwrap(manager.store)))
         manager.stop()
         XCTAssertEqual(try Data(contentsOf: db), original)
     }

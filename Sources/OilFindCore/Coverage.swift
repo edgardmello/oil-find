@@ -78,7 +78,7 @@ public struct CoverageStats: Codable, Equatable {
     }
 }
 public enum CoverageExplanation: Equatable {
-    case indexed, scope(CoverageReason), userExcluded(String), fileType(String), noAccess, volume, cloud, pending
+    case indexed, scope(CoverageReason), userExcluded(String), fileType(String), noAccess, volume, cloud, missing, pending
 }
 public enum Coverage {
     // Cold, single-path inspection. All filesystem work stays outside the index lock.
@@ -88,9 +88,11 @@ public enum Coverage {
         let root = config.rootPath.precomposedStringWithCanonicalMapping
         let withinVolumeRoot = root.hasPrefix("/Volumes/") && (path == root || path.hasPrefix(root + "/"))
         if (path == "/Volumes" || path.hasPrefix("/Volumes/")) && !withinVolumeRoot { return .volume }
+        guard path == root || path.hasPrefix(root == "/" ? "/" : root + "/") else { return .volume }
         for excluded in config.userExcludedPaths where path == excluded || path.hasPrefix(excluded == "/" ? "/" : excluded + "/") { return .userExcluded(excluded) }
         var info = stat()
         let exists = path.withCString { lstat($0, &info) == 0 }
+        let lookupError = errno
         let reason = Array(path.utf8).withUnsafeBufferPointer { config.exclusionReason(path: $0, isDirectory: !exists || info.st_mode & S_IFMT == S_IFDIR) }
         if let reason {
             if reason == .fileType {
@@ -100,7 +102,7 @@ public enum Coverage {
             if reason == .noAccess { return .noAccess }
             if reason.scopeKey != nil { return .scope(reason) }
         }
-        if !exists && (errno == EPERM || errno == EACCES) { return .noAccess }
+        if !exists && (lookupError == EPERM || lookupError == EACCES) { return .noAccess }
         var ancestor = exists && info.st_mode & S_IFMT == S_IFDIR ? path : (path as NSString).deletingLastPathComponent
         while !ancestor.isEmpty {
             var s = stat()
@@ -113,6 +115,6 @@ public enum Coverage {
             if ancestor == "/" { break }
             ancestor = (ancestor as NSString).deletingLastPathComponent
         }
-        return .pending
+        return !exists && (lookupError == ENOENT || lookupError == ENOTDIR) ? .missing : .pending
     }
 }

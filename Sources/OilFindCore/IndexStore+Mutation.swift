@@ -46,10 +46,13 @@ extension IndexStore {
     }
     // Loaded indexes can serve queries before their hash table has finished building.
     public func containsPath(_ path: String) -> Bool {
-        if hashReady { return resolve(path: path) != nil }
+        indexedID(forPath: path) != nil
+    }
+    func indexedID(forPath path: String) -> UInt32? {
+        if hashReady { return resolve(path: path) }
         let root = rootPath == "/" ? "" : rootPath
-        guard path == rootPath || path.hasPrefix(root + "/") else { return false }
-        if path == rootPath { return isLive(0) }
+        guard path == rootPath || path.hasPrefix(root + "/") else { return nil }
+        if path == rootPath { return isLive(0) ? 0 : nil }
         var current: UInt32 = 0
         for component in path.dropFirst(root.count).split(separator: "/") {
             let bytes = Array(component.utf8)
@@ -60,9 +63,9 @@ extension IndexStore {
                     if sift_name_equal(candidate.baseAddress, candidate.count, name.baseAddress, name.count, caseSensitiveNames ? 1 : 0) != 0 { found = UInt32(i); break }
                 }
             }
-            guard let id = found else { return false }; current = id
+            guard let id = found else { return nil }; current = id
         }
-        return true
+        return current
     }
     internal func resolve(bytes: UnsafeBufferPointer<UInt8>) -> UInt32? {
         let rootLen = rootPath.utf8.count

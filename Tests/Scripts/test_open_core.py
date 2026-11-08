@@ -1,5 +1,4 @@
 from pathlib import Path
-import subprocess
 import unittest
 
 
@@ -8,12 +7,10 @@ MODULE = "OilFind" + "Pro"
 
 
 class OpenCoreTests(unittest.TestCase):
-    def test_private_repository_is_not_tracked(self):
-        files = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).decode().split("\0")
-        self.assertFalse([name for name in files if name.startswith("Pro/")])
-        ignored = subprocess.run(["git", "check-ignore", "Pro/Sources/placeholder.swift"], cwd=ROOT,
-                                 capture_output=True, text=True)
-        self.assertEqual(ignored.returncode, 0, ignored.stderr)
+    def test_personal_build_includes_content_search(self):
+        self.assertTrue((ROOT / "Pro" / "Sources" / MODULE / "ContentSearchManager.swift").is_file())
+        manifest = (ROOT / "Package.swift").read_text()
+        self.assertIn(f'dependencies: ["OilFindApp", "{MODULE}"]', manifest)
 
     def test_public_module_boundary(self):
         allowed = {"Package.swift", "Sources/OilFind/main.swift"}

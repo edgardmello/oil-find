@@ -6,6 +6,7 @@ final class StateView: FlippedView {
     let state: State
     private var diagnostic: QueryDiagnostic?
     private var hasNoAccess = false
+    private var explanation: CoverageExplanation?
     private(set) var count = 0
     private let icon = NSImageView()
     private let spinner = NSProgressIndicator()
@@ -34,17 +35,17 @@ final class StateView: FlippedView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     @objc private func grantAccess() { Permissions.openSettings() }
-    func configure(diagnostic: QueryDiagnostic?, hasNoAccess: Bool) {
-        self.diagnostic = diagnostic; self.hasNoAccess = hasNoAccess
+    func configure(diagnostic: QueryDiagnostic?, hasNoAccess: Bool, explanation: CoverageExplanation? = nil) {
+        self.diagnostic = diagnostic; self.hasNoAccess = hasNoAccess; self.explanation = explanation
         titleLabel.stringValue = L10n.text(diagnostic == nil ? "empty.title" : "diag.title")
-        body.stringValue = diagnostic.map(L10n.diagnostic) ?? L10n.text("empty.body")
+        body.stringValue = diagnostic.map(L10n.diagnostic) ?? explanation.map(L10n.explanation) ?? L10n.text("empty.body")
         noAccess.isHidden = !hasNoAccess; grant.isHidden = !hasNoAccess; needsLayout = true
     }
     func updateCount(_ count: Int) { self.count = count; body.stringValue = L10n.text("indexing.body", Presentation.countText(count)) }
     func localize() {
         noAccess.stringValue = L10n.text("empty.noAccess"); grant.title = L10n.text("empty.grant")
         switch state {
-        case .empty: configure(diagnostic: diagnostic, hasNoAccess: hasNoAccess)
+        case .empty: configure(diagnostic: diagnostic, hasNoAccess: hasNoAccess, explanation: explanation)
         case .indexing: titleLabel.stringValue = L10n.text("indexing.title"); updateCount(count)
         }
         needsLayout = true

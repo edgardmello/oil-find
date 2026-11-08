@@ -269,7 +269,10 @@ final class ExternalDriveCatalog: ObservableObject, ExternalDriveCatalogReading 
     }
     private func config(path: String) -> IndexConfig {
         let standard = IndexConfig.standard()
-        return IndexConfig(rootPath: path, excludedNames: standard.excludedNames)
+        let excluded = SettingsPreferences.indexConfig(limited: false).userExcludedPaths.filter {
+            ExcludedFolders.contains(path, path: $0) || ExcludedFolders.contains($0, path: path)
+        }
+        return IndexConfig(rootPath: path, excludedNames: standard.excludedNames, userExcludedPaths: excluded)
     }
     private func reconcile() {
         #if DEBUG

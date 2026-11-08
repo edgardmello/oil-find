@@ -65,23 +65,24 @@ public enum MultiSearcher {
             let total = results.reduce(0) { $0 + $1.total }
             let limit = query.isEmpty ? min(200, total) : (total > 200_000 ? min(5000, total) : total)
             struct Head { var source: Int, position: Int }
+            let order = options.effectiveSort(for: query)
             func better(_ a: Head, _ b: Head) -> Bool {
                 let x = results[a.source].items[a.position], y = results[b.source].items[b.position]
                 let lhs = stores[a.source], rhs = stores[b.source]
-                switch query.isEmpty ? SortKey.modified : options.sort {
+                switch order.key {
                 case .relevance:
                     let xs = results[a.source].scores[a.position], ys = results[b.source].scores[b.position]
                     if xs != ys { return xs > ys }
                 case .name:
                     let xn = lhs.nameBytes(x), yn = rhs.nameBytes(y)
                     let cmp = sift_name_compare(xn.baseAddress, xn.count, yn.baseAddress, yn.count)
-                    if cmp != 0 { return options.ascending ? cmp < 0 : cmp > 0 }
+                    if cmp != 0 { return order.ascending ? cmp < 0 : cmp > 0 }
                 case .modified:
                     let xs = lhs.mtime[Int(x)], ys = rhs.mtime[Int(y)]
-                    if xs != ys { return !query.isEmpty && options.ascending ? xs < ys : xs > ys }
+                    if xs != ys { return order.ascending ? xs < ys : xs > ys }
                 case .size:
                     let xs = lhs.size(x), ys = rhs.size(y)
-                    if xs != ys { return options.ascending ? xs < ys : xs > ys }
+                    if xs != ys { return order.ascending ? xs < ys : xs > ys }
                 }
                 return a.source == b.source ? x < y : a.source < b.source
             }
