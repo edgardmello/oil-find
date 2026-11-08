@@ -12,6 +12,53 @@ final class SearchEditingTests: XCTestCase {
                         isARepeat: false, keyCode: code)!
     }
 
+    func testInlinePreviewShortcutTogglesAndResetsOnHide() {
+        _ = NSApplication.shared
+        let panel = SearchPanel(snapshot: true)
+        defer { panel.close() }
+        let controller = panel.searchController
+        let shortcut = event("P", code: 35, in: panel, modifiers: [.command, .shift])
+
+        XCTAssertFalse(controller.inlinePreviewVisible)
+        XCTAssertTrue(panel.performKeyEquivalent(with: shortcut))
+        XCTAssertTrue(controller.inlinePreviewVisible)
+        XCTAssertTrue(panel.performKeyEquivalent(with: shortcut))
+        XCTAssertFalse(controller.inlinePreviewVisible)
+        XCTAssertTrue(panel.performKeyEquivalent(with: shortcut))
+        panel.hide()
+        XCTAssertFalse(controller.inlinePreviewVisible)
+    }
+
+    func testSpaceTypesIntoSearchAfterNavigatingWithSidePreview() throws {
+        _ = NSApplication.shared
+        let suite = "OilFindSidePreview-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        preferences.set(true, forKey: "previewWithSpace")
+        let controller = SearchViewController(snapshot: true, preferences: preferences)
+        let panel = NSWindow(contentRect: NSRect(origin: .zero, size: Theme.panelSize),
+                             styleMask: .borderless, backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.contentViewController = controller
+        panel.delegate = controller
+        defer { panel.close() }
+        let field = controller.searchField
+        field.text = "two"
+        field.focus()
+        let editor = try XCTUnwrap(field.input.currentEditor() as? SearchEditor)
+        editor.setSelectedRange(NSRange(location: 3, length: 0))
+
+        let down = event("\u{F701}", code: 125, in: panel, modifiers: [])
+        let space = event(" ", code: 49, in: panel, modifiers: [])
+        controller.setInlinePreviewVisible(true)
+        XCTAssertTrue(controller.handleKey(down))
+        XCTAssertTrue(controller.browsingResults)
+        XCTAssertEqual(controller.footer.previewKey, "⌘Y")
+        XCTAssertFalse(controller.handleKey(space))
+        editor.keyDown(with: space)
+        XCTAssertEqual(editor.string, "two ")
+    }
+
     func testTextEditingShortcutsWorkWithoutAnApplicationMenu() throws {
         _ = NSApplication.shared
         let pasteboard = NSPasteboard.general

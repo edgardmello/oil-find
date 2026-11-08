@@ -29,6 +29,11 @@ final class FooterBar: FlippedView {
     private let status = Theme.label(11.5, .regular, .tertiaryLabelColor)
     private let hints = [KeyHint("↩", L10n.text("hint.open")), KeyHint("⌘↩", L10n.text("hint.reveal")), KeyHint("⌘Y", L10n.text("hint.preview")), KeyHint("⌘C", L10n.text("hint.copy"))]
     private let settings = SettingsButton()
+    private let inlinePreview = NSButton(frame: .zero)
+    var onInlinePreview: (() -> Void)?
+    var inlinePreviewVisible = false {
+        didSet { updateInlinePreviewButton() }
+    }
     var onSettings: (() -> Void)?
     private let syntax = KeyHint("⌘/", L10n.text("hint.syntax"))
     var fileActions = true { didSet { hints[3].localize(L10n.text(fileActions ? "hint.copy" : "hint.copyResult")); needsLayout = true } }
@@ -43,6 +48,13 @@ final class FooterBar: FlippedView {
         status.wantsLayer = true; toast.wantsLayer = true; toast.alphaValue = 0
         toast.lineBreakMode = .byTruncatingMiddle
         addSubview(status); addSubview(toast); hints.forEach(addSubview); addSubview(syntax); addSubview(settings)
+        inlinePreview.isBordered = false
+        inlinePreview.setButtonType(.pushOnPushOff)
+        inlinePreview.imagePosition = .imageOnly
+        inlinePreview.target = self
+        inlinePreview.action = #selector(toggleInlinePreview)
+        addSubview(inlinePreview)
+        updateInlinePreviewButton()
         settings.onPress = { [weak self] in self?.onSettings?() }
         actionable = false
     }
@@ -65,7 +77,17 @@ final class FooterBar: FlippedView {
             }
         }
     }
+    @objc private func toggleInlinePreview() { onInlinePreview?() }
+    private func updateInlinePreviewButton() {
+        let title = L10n.text(inlinePreviewVisible ? "inlinePreview.hide" : "inlinePreview.show")
+        inlinePreview.image = Theme.symbol("sidebar.right", size: 14, weight: .regular)
+        inlinePreview.contentTintColor = inlinePreviewVisible ? .controlAccentColor : .secondaryLabelColor
+        inlinePreview.state = inlinePreviewVisible ? .on : .off
+        inlinePreview.toolTip = title + " (⇧⌘P)"
+        inlinePreview.setAccessibilityLabel(title)
+    }
     func localize() {
+        updateInlinePreviewButton()
         updatePreviewKey()
         for (hint, key) in zip(hints, ["open", "reveal", "preview", "copy"]) { hint.localize(L10n.text("hint." + (key == "copy" && !fileActions ? "copyResult" : key))) }
         syntax.localize(L10n.text("hint.syntax")); settings.localize()
@@ -79,7 +101,8 @@ final class FooterBar: FlippedView {
         let visibleHints = actionable && !warning ? activeHints + [syntax] : [syntax]
         hints.forEach { $0.isHidden = !actionable || warning || !activeHints.contains($0) }
         settings.frame = NSRect(x: bounds.width - 18 - settings.desiredWidth, y: 4, width: settings.desiredWidth, height: 26)
-        var x = settings.frame.minX - 14 - visibleHints.reduce(0) { $0 + $1.desiredWidth } - CGFloat(visibleHints.count - 1) * 10
+        inlinePreview.frame = NSRect(x: settings.frame.minX - 29, y: 4, width: 26, height: 26)
+        var x = inlinePreview.frame.minX - 12 - visibleHints.reduce(0) { $0 + $1.desiredWidth } - CGFloat(visibleHints.count - 1) * 10
         status.frame = NSRect(x: 22, y: 9, width: max(0, x - 38), height: 16)
         toast.frame = status.frame
         for hint in visibleHints { hint.frame = NSRect(x: x, y: 8, width: hint.desiredWidth, height: 18); x += hint.desiredWidth + 10 }

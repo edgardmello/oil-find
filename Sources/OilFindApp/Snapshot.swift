@@ -10,8 +10,9 @@ enum SnapshotError: Error, CustomStringConvertible {
 enum Snapshot {
     static func run(_ arguments: [String], appExtension: ApplicationExtension? = nil, externalDrives: ExternalDriveCatalog = ExternalDriveCatalog()) throws {
         let allowed = Set(["--snapshot", "--state", "--query", "--filter", "--sort", "--select", "--appearance", "--db", "--settings-scroll", "--language", "--coverage", "--update-notes", "--update-scroll", "--topic-index"])
-        var values: [String: String] = [:], i = 0, granted = false
+        var values: [String: String] = [:], i = 0, granted = false, inlinePreview = false
         while i < arguments.count {
+            if arguments[i] == "--inline-preview" { inlinePreview = true; i += 1; continue }
             if arguments[i] == "--granted" { granted = true; i += 1; continue }
             guard allowed.contains(arguments[i]), i + 1 < arguments.count else { throw SnapshotError.failed("Invalid snapshot argument: \(arguments[i])") }
             values[arguments[i]] = arguments[i + 1]; i += 2
@@ -149,10 +150,11 @@ enum Snapshot {
         controller.additionalSearchProvider = topicSearch
         try controller.prepareSnapshot(state: state, query: values["--query"] ?? "readme", options: SearchOptions(sort: key, ascending: key == .name, kind: kind == 0 || filter == "additional" ? nil : UInt8(kind)), store: store, selection: selection, additionalSources: externalDrives.searchSources() + (appExtension?.searchSources() ?? []), additionalOnly: filter == "additional")
         let view = controller.view
-        view.frame = NSRect(origin: .zero, size: Theme.panelSize)
+        if inlinePreview { controller.setInlinePreviewVisible(true) }
+        view.frame = NSRect(origin: .zero, size: inlinePreview ? panel.frame.size : Theme.panelSize)
         view.layoutSubtreeIfNeeded(); view.displayIfNeeded()
         let deadline = Date().addingTimeInterval(1)
-        while !controller.results.icons.isIdle && Date() < deadline {
+        while (inlinePreview || !controller.results.icons.isIdle) && Date() < deadline {
             RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         }
         view.layoutSubtreeIfNeeded()
