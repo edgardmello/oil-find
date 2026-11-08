@@ -29,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var settingsController: SettingsWindowController?
     private var secondaryInstance = false
     private var pendingSearchLink: SearchLink?
-    private var openItem: NSMenuItem?, hotKeyFailureItem: NSMenuItem?
+    private var openItem: NSMenuItem?, hotKeyFailureItem: NSMenuItem?, stashItem: NSMenuItem?
     private var permissionTimer: Timer?
     private var welcomeController: WelcomeWindowController?
     private var welcomeState: WelcomeState?
@@ -166,8 +166,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rescanItem = item("menu.rescan", #selector(rescan))
         menu.addItem(.separator())
         loginItem = item("menu.loginItem", #selector(toggleLogin))
-        let stashItem = item("stash.title", #selector(showStash), "s")
-        stashItem.keyEquivalentModifierMask = [.command, .shift]
+        stashItem = item("stash.title", #selector(showStash))
+        refreshStashShortcut()
         settingsItem = item("menu.settings", #selector(showSettings), ",")
         refreshExtensionMenu()
         menu.addItem(.separator())
@@ -196,6 +196,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if hotKey != nil { welcomeController?.model.updateShortcut(keyCode, modifiers) }
         return hotKey != nil
     }
+    private func refreshStashShortcut() {
+        if let stashItem { StashShortcut.show.chord(in: .standard).apply(to: stashItem) }
+    }
     @objc private func showStash() { panel.searchController.showStash() }
     @objc func showSettings() { presentSettings() }
     private func presentSettings() {
@@ -210,6 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard let self else { return }
                 self.manager?.updateConfig(SettingsPreferences.indexConfig(limited: self.limited))
             }
+            model.onStashShortcutsChange = { [weak self] in self?.refreshStashShortcut() }
             model.onPinyinChange = { [weak self] in self?.panel.searchController.startSearch(preserveSelection: true) }
             settingsController = SettingsWindowController(model: model, appExtension: appExtension, externalDrives: externalDrives)
         }
