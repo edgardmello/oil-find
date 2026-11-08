@@ -34,7 +34,14 @@ for target in package["targets"]:
         shutil.copytree(binary / name, resources / name)
 ' "$BINARY_DIR" "$APP_PATH/Contents/Resources"
 SELF_SIGNED="Oil Find Self-Signed"
-if [[ -n "${OILFIND_SIGN_IDENTITY:-}" ]]; then
+LOCAL_IDENTITY="${OILFIND_LOCAL_SIGN_IDENTITY:-}"
+if [[ -z "$LOCAL_IDENTITY" && -z "${OILFIND_SIGN_IDENTITY:-}" && -f .env.oilfind-sign-identity ]]; then
+    LOCAL_IDENTITY="$(cat .env.oilfind-sign-identity)"
+fi
+if [[ -n "$LOCAL_IDENTITY" ]]; then
+    BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP_PATH/Contents/Info.plist")"
+    codesign --force --sign "$LOCAL_IDENTITY" --identifier "$BUNDLE_ID" --timestamp=none "$APP_PATH"
+elif [[ -n "${OILFIND_SIGN_IDENTITY:-}" ]]; then
     codesign --force --sign "$OILFIND_SIGN_IDENTITY" --identifier com.oiloil.find --options runtime --timestamp "$APP_PATH"
 elif security find-identity -v -p codesigning | grep -q "\"$SELF_SIGNED\""; then
     # Stable identity: macOS keeps Full Disk Access across updates. See scripts/create-signing-cert.sh.

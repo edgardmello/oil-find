@@ -122,7 +122,7 @@ scripts/build-app.sh   # builds build/Oil Find.app
 scripts/install.sh     # builds and installs into Applications
 ```
 
-Building from source gives you the free version, without Pro. Your own builds are ad-hoc signed, so you need to grant Full Disk Access again after each rebuild.
+Building from source gives you the free version, without Pro. For personal builds, use a stable code-signing identity to keep macOS permissions across rebuilds. List available identities with `security find-identity -v -p codesigning`. Put the fingerprint of an Apple Development or trusted local code-signing certificate on a single line in the git-ignored `.env.oilfind-sign-identity` file, or set `OILFIND_LOCAL_SIGN_IDENTITY` when running `scripts/build-app.sh`. After changing the signing identity, grant the app its permissions again. The same identity and bundle identifier are used on subsequent builds.
 
 ## Privacy
 

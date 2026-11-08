@@ -3,10 +3,14 @@ import AppKit
 final class SearchAccessoryBar: FlippedView {
     private var chips: [ChromeButton] = []
     private var stashControls: [ChromeButton] = []
-    private let stashTable = InlineStashTable(frame: .zero)
+    private let stashTable: InlineStashTable = {
+        let table = InlineStashTable(frame: .zero)
+        table.isHidden = true
+        return table
+    }()
 
     var desiredHeight: CGFloat {
-        (chips.isEmpty ? 0 : 32) + (stashControls.isEmpty ? 0 : 30 + stashTable.desiredHeight)
+        (chips.isEmpty ? 0 : 32) + (stashControls.isEmpty ? 0 : 30) + (stashTable.isHidden ? 0 : stashTable.desiredHeight + 8)
     }
 
     func setFilters(_ filters: [(String, () -> Void)]) {
@@ -18,6 +22,8 @@ final class SearchAccessoryBar: FlippedView {
                   dragging: @escaping (Bool) -> Void, leaveSearch: @escaping () -> Void, remove: @escaping (Set<UUID>) -> Void, menuDelegate: NSMenuDelegate) {
         stashControls.forEach { $0.removeFromSuperview() }
         stashControls = []
+        stashTable.onCopyAll = copy
+        stashTable.onOpenWindow = open
         stashTable.onRemove = remove
         stashTable.onDragging = dragging
         stashTable.onOpen = leaveSearch
@@ -25,8 +31,7 @@ final class SearchAccessoryBar: FlippedView {
         stashTable.update(files, visible: expanded)
         stashTable.isHidden = !expanded || files.isEmpty
         if stashTable.superview == nil { addSubview(stashTable) }
-        guard expanded else { return }
-        if !files.isEmpty { stashControls.append(button(L10n.text("panel.copyStash", String(files.count)), action: copy)) }
+        guard expanded, files.isEmpty else { return }
         stashControls.append(button(L10n.text("panel.openStashWindow"), action: open))
     }
 
@@ -64,6 +69,7 @@ final class SearchAccessoryBar: FlippedView {
         var y: CGFloat = 0
         if !chips.isEmpty { row(chips, y: y); y += 32 }
         if !stashControls.isEmpty { row(stashControls, y: y); y += 30 }
-        stashTable.frame = NSRect(x: 18, y: y, width: max(0, bounds.width - 36), height: stashTable.desiredHeight)
+        let inset = CompactFileTable.inset
+        stashTable.frame = NSRect(x: inset, y: y + 4, width: max(0, bounds.width - 2 * inset), height: stashTable.desiredHeight)
     }
 }

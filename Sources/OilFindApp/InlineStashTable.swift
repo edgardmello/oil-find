@@ -19,6 +19,10 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
     }
 
     private let table = StashTableView()
+    private let compactHeader = CompactFileHeader(stash: true)
+    private let icons = IconProvider()
+    var onCopyAll: (() -> Void)?
+    var onOpenWindow: (() -> Void)?
     private var files: [StashedFile] = []
     private var metadata: [UUID: Metadata] = [:]
     private var generation = 0
@@ -28,37 +32,57 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
     var onOpen: (() -> Void)?
     var onDragging: ((Bool) -> Void)?
     weak var menuDelegate: NSMenuDelegate?
-    var desiredHeight: CGFloat { files.isEmpty ? 0 : 24 + CGFloat(min(files.count, 6)) * 22 }
+    var desiredHeight: CGFloat { files.isEmpty ? 0 : CompactFileTable.headerHeight + CGFloat(min(files.count, 6)) * CompactFileTable.rowHeight }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         hasVerticalScroller = true
         autohidesScrollers = true
-        drawsBackground = false
-        table.rowHeight = 22
-        table.headerView = NSTableHeaderView()
+        drawsBackground = true
+        backgroundColor = .controlBackgroundColor
+        scrollerStyle = .overlay
+        wantsLayer = true
+        layer?.cornerRadius = CompactFileTable.inset
+        layer?.masksToBounds = true
+        table.style = .plain
+        table.backgroundColor = .clear
+        table.rowHeight = CompactFileTable.rowHeight
+        table.headerView = compactHeader
+        table.gridStyleMask = .solidHorizontalGridLineMask
+        table.gridColor = .separatorColor
         table.intercellSpacing = .zero
-        table.usesAlternatingRowBackgroundColors = true
         table.allowsMultipleSelection = true
-        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.columnAutoresizingStyle = .noColumnAutoresizing
+        table.allowsColumnReordering = false
+        table.allowsColumnResizing = false
         table.autoresizingMask = [.width]
-        for (key, width, minimum) in [("name", 240.0, 95.0), ("path", 240.0, 80.0), ("size", 84.0, 56.0), ("date", 160.0, 105.0)] {
+        for key in CompactFileTable.keys {
             let column = NSTableColumn(identifier: .init(key))
-            column.width = width
-            column.minWidth = minimum
+            column.minWidth = 0
             table.addTableColumn(column)
         }
         table.dataSource = self
         table.delegate = self
         table.setDraggingSourceOperationMask(.copy, forLocal: false)
         table.menuForSelection = { [weak self] in self?.makeMenu() }
+        compactHeader.actionsMenu = { [weak self] in self?.makeStashMenu() }
         documentView = table
         localize()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    override func layout() {
+        super.layout()
+        var widths = CompactFileTable.widths(for: contentSize.width)
+        widths[0] += CompactFileTable.iconWidth
+        for (column, width) in zip(table.tableColumns, widths) where column.width != width {
+            column.width = width
+        }
+    }
+
     func localize() {
+        compactHeader.needsDisplay = true
         for column in table.tableColumns { column.title = L10n.text("stash.column." + column.identifier.rawValue) }
         table.reloadData()
     }
@@ -105,18 +129,41 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
         let details = metadata[file.id]
         let url = details?.url ?? URL(fileURLWithPath: file.path)
         let label = NSTextField(labelWithString: "")
-        label.font = .systemFont(ofSize: 11)
+        let key = column.identifier.rawValue
+        label.font = key == "size" || key == "date" ? .monospacedSystemFont(ofSize: 11, weight: .regular)
+            : .systemFont(ofSize: key == "name" ? 12 : 11)
         label.lineBreakMode = .byTruncatingMiddle
         switch column.identifier.rawValue {
         case "path": label.stringValue = Presentation.abbreviate(path: url.deletingLastPathComponent().path, home: NSHomeDirectory())
         case "size": label.stringValue = details?.size.map { Presentation.sizeText(UInt64(max(0, $0))) } ?? "—"
-        case "date": label.stringValue = details?.date.map { Presentation.dateText($0, now: Date(), calendar: .current, chinese: L10n.chinese) } ?? "—"
+        case "date": label.stringValue = details?.date.map { CompactFileTable.date($0) } ?? "—"
         default:
             label.stringValue = !loading && details == nil ? L10n.text("stash.unavailable", url.lastPathComponent) : url.lastPathComponent
         }
-        label.textColor = details == nil ? .secondaryLabelColor : .labelColor
+        label.textColor = key == "path" || (!loading && details == nil) ? .secondaryLabelColor : .labelColor
         label.toolTip = url.path
-        return label
+        let cell = NSTableCellView()
+        cell.textField = label
+        label.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: key == "name" ? CompactFileTable.iconWidth + 8 : 8),
+            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+            label.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+        ])
+        if key == "name" {
+            let icon = NSImageView()
+            icon.translatesAutoresizingMaskIntoConstraints = false
+            icon.image = icons.icon(name: url.lastPathComponent, path: url.path, flags: 0, kind: 0, resolveFileIcon: false) { _ in }
+            cell.addSubview(icon)
+            NSLayoutConstraint.activate([
+                icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 16),
+                icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                icon.widthAnchor.constraint(equalToConstant: 16),
+                icon.heightAnchor.constraint(equalTo: icon.widthAnchor)
+            ])
+        }
+        return cell
     }
 
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
@@ -149,6 +196,21 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
         if event.keyCode == 51, modifiers.contains(.command) { return true }
         if modifiers.isEmpty || modifiers == .shift, [115, 116, 119, 121, 125, 126].contains(event.keyCode) { return false }
         return nil
+    }
+
+    private func makeStashMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.delegate = menuDelegate
+        for (tag, key) in ["panel.copyStash", "panel.openStashWindow"].enumerated() {
+            let item = menu.addItem(withTitle: L10n.text(key, String(files.count)), action: #selector(stashHeaderAction(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = tag
+        }
+        return menu
+    }
+
+    @objc private func stashHeaderAction(_ item: NSMenuItem) {
+        if item.tag == 0 { onCopyAll?() } else { onOpenWindow?() }
     }
 
     private func makeMenu() -> NSMenu {

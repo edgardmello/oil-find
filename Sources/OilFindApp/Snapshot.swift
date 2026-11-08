@@ -10,8 +10,9 @@ enum SnapshotError: Error, CustomStringConvertible {
 enum Snapshot {
     static func run(_ arguments: [String], appExtension: ApplicationExtension? = nil, externalDrives: ExternalDriveCatalog = ExternalDriveCatalog()) throws {
         let allowed = Set(["--snapshot", "--state", "--query", "--filter", "--sort", "--select", "--appearance", "--db", "--settings-scroll", "--language", "--coverage", "--update-notes", "--update-scroll", "--topic-index"])
-        var values: [String: String] = [:], i = 0, granted = false, inlinePreview = false
+        var values: [String: String] = [:], i = 0, granted = false, inlinePreview = false, compactTable = false
         while i < arguments.count {
+            if arguments[i] == "--compact-table" { compactTable = true; i += 1; continue }
             if arguments[i] == "--inline-preview" { inlinePreview = true; i += 1; continue }
             if arguments[i] == "--granted" { granted = true; i += 1; continue }
             guard allowed.contains(arguments[i]), i + 1 < arguments.count else { throw SnapshotError.failed("Invalid snapshot argument: \(arguments[i])") }
@@ -25,7 +26,7 @@ enum Snapshot {
         defer { L10n.snapshotChinese = nil }
         appExtension?.languageDidChange(chinese: L10n.chinese)
         let state = values["--state"] ?? "results"
-        guard ["results", "recent", "empty", "indexing", "welcome", "toast", "settings", "menu", "no-access", "diagnostic", "syntax", "update-available", "update-downloading", "update-failed", "update-latest"].contains(state) else { throw SnapshotError.failed("Invalid state: \(state)") }
+        guard ["results", "stash", "recent", "empty", "indexing", "welcome", "toast", "settings", "menu", "no-access", "diagnostic", "syntax", "update-available", "update-downloading", "update-failed", "update-latest"].contains(state) else { throw SnapshotError.failed("Invalid state: \(state)") }
         let appearance = values["--appearance"] ?? "light"
         guard ["light", "dark"].contains(appearance) else { throw SnapshotError.failed("Invalid appearance: \(appearance)") }
         let filter = values["--filter"] ?? "all"
@@ -150,6 +151,8 @@ enum Snapshot {
         controller.additionalSearchProvider = topicSearch
         try controller.prepareSnapshot(state: state, query: values["--query"] ?? "readme", options: SearchOptions(sort: key, ascending: key == .name, kind: kind == 0 || filter == "additional" ? nil : UInt8(kind)), store: store, selection: selection, additionalSources: externalDrives.searchSources() + (appExtension?.searchSources() ?? []), additionalOnly: filter == "additional")
         let view = controller.view
+        if compactTable { controller.results.setCompact(true) }
+        if state == "stash" { controller.prepareStashSnapshot() }
         if inlinePreview { controller.setInlinePreviewVisible(true) }
         view.frame = NSRect(origin: .zero, size: inlinePreview ? panel.frame.size : Theme.panelSize)
         view.layoutSubtreeIfNeeded(); view.displayIfNeeded()
