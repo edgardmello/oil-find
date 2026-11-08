@@ -33,6 +33,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private let preferences: UserDefaults
     private let filePaste = FilePasteHandoff()
     private lazy var fileStash = FileStash(preferences: preferences)
+    private lazy var scriptWindow = FileScriptWindow()
     private lazy var stashWindow = StashWindow(stash: fileStash)
     private let queue = DispatchQueue(label: "com.oiloil.find.search", qos: .userInteractive)
     private let coverageQueue = DispatchQueue(label: "com.oiloil.find.searchCoverage", qos: .utility)
@@ -727,6 +728,13 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if flags.intersection([.command, .control, .option, .shift]) == [.control, .option],
            let slot = Int(key), (1...9).contains(slot), !event.isARepeat,
            applyQuickFilter(at: slot - 1) { return true }
+        if let slot = FileScript.shortcutSlot(keyCode: UInt32(event.keyCode), modifiers: HotKey.carbonModifiers(flags)) {
+            let scripts = FileScript.load(from: preferences)
+            if scripts.indices.contains(slot) {
+                if !event.isARepeat { runFileScript(scripts[slot]) }
+                return true
+            }
+        }
         if flags.contains(.command) || flags.contains(.control) {
             if StashShortcut.add.chord(in: preferences).matches(event) {
                 if !event.isARepeat { stashSelection() }
@@ -1038,12 +1046,53 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             paste.target = self
             paste.isEnabled = stash.isEnabled
             menu.insertItem(paste, at: max(0, menu.items.count - 1))
+            if let scripts = fileScriptsMenu() {
+                let item = NSMenuItem(title: L10n.text("fileScripts.run"), action: nil, keyEquivalent: "")
+                item.submenu = scripts
+                item.isEnabled = stash.isEnabled && selectedOnlineItems.count == results.selectedItems.count
+                menu.insertItem(item, at: max(0, menu.items.count - 1))
+            }
             let exclude = NSMenuItem(title: L10n.text("ctx.exclude"), action: #selector(excludeSelected), keyEquivalent: "")
             exclude.target = self
             menu.insertItem(exclude, at: max(0, menu.items.count - 1))
         }
         return menu
     }
+    private func fileScriptsMenu() -> NSMenu? {
+        let scripts = FileScript.load(from: preferences)
+        guard !scripts.isEmpty else { return nil }
+        let menu = NSMenu()
+        for (index, script) in scripts.enumerated() {
+            let key = FileScript.shortcutKeys.indices.contains(index)
+                ? Shortcut.keyEquivalent(FileScript.shortcutKeys[index]) : ""
+            let item = menu.addItem(withTitle: script.name, action: #selector(runFileScriptItem(_:)), keyEquivalent: key)
+            item.keyEquivalentModifierMask = HotKey.modifierFlags(FileScript.shortcutModifiers)
+            item.target = self
+            item.representedObject = script.path
+            item.toolTip = script.path
+        }
+        return menu
+    }
+
+    @objc private func runFileScriptItem(_ item: NSMenuItem) {
+        guard let path = item.representedObject as? String,
+              let script = FileScript.load(from: preferences).first(where: { $0.path == path }) else { return }
+        runFileScript(script)
+    }
+
+    private func runFileScript(_ script: FileScript) {
+        guard !snapshot else { return }
+        let files = selectedOnlineItems.map { URL(fileURLWithPath: $0.path) }
+        guard !files.isEmpty, files.count == results.selectedItems.count else {
+            footer.warning = true
+            footer.text = L10n.text("fileScripts.unavailable")
+            return
+        }
+        hidePanel?()
+        if scriptWindow.isRunning { scriptWindow.present() }
+        else { scriptWindow.start(script, files: files) }
+    }
+
     func captureFilePasteDestination() {
         if !snapshot { filePaste.captureDestination() }
     }

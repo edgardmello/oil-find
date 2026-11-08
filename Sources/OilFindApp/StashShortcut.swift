@@ -52,6 +52,7 @@ enum StashShortcut: String, CaseIterable {
         let flags = HotKey.modifierFlags(chord.modifiers)
         guard flags.contains(.control) || (flags.contains(.command) && flags != .command),
               chord != global,
+              FileScript.shortcutSlot(keyCode: chord.keyCode, modifiers: chord.modifiers) == nil,
               !Self.allCases.contains(where: { $0 != self && $0.chord(in: preferences) == chord }) else { return false }
 
         let key = Shortcut.keyEquivalent(chord.keyCode)
