@@ -109,6 +109,7 @@ final class SearchPanel: NSPanel {
     }
     func show(source: PanelSource = .interaction) {
         let cold = !isVisible
+        if cold || hiding || !isKeyWindow { searchController.captureFilePasteDestination() }
         if cold || hiding {
             resizeForInlinePreview(usePointerScreen: cold, display: false)
         }
@@ -127,6 +128,16 @@ final class SearchPanel: NSPanel {
         searchController.panelWillShow(); searchController.searchField.focus(selectAll: true)
         fade = WindowFade(window: self, target: 1, duration: Theme.Motion.reduced ? Theme.Motion.reducedFade : Theme.Motion.panelInFade, curve: .easeOut)
         fade?.start()
+    }
+    func dismissForFilePaste() -> Bool {
+        guard isVisible, isKeyWindow, !hiding else { return false }
+        searchController.panelDidHide()
+        animationGeneration += 1
+        fade?.stop()
+        searchController.results.cancelPress()
+        orderOut(nil)
+        searchController.quickLook.close()
+        return true
     }
     func hide(source: PanelSource = .interaction) {
         searchController.panelDidHide()

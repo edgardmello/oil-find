@@ -31,6 +31,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private var coverageExplanation: CoverageExplanation?
     private let snapshot: Bool
     private let preferences: UserDefaults
+    private let filePaste = FilePasteHandoff()
     private lazy var fileStash = FileStash(preferences: preferences)
     private lazy var stashWindow = StashWindow(stash: fileStash)
     private let queue = DispatchQueue(label: "com.oiloil.find.search", qos: .userInteractive)
@@ -731,6 +732,10 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                 if !event.isARepeat { stashSelection() }
                 return true
             }
+            if StashShortcut.paste.chord(in: preferences).matches(event) {
+                if !event.isARepeat { pasteSelectionInPreviousApp() }
+                return true
+            }
             if StashShortcut.show.chord(in: preferences).matches(event) {
                 if !event.isARepeat { showStash() }
                 return true
@@ -1028,12 +1033,36 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             stash.target = self
             stash.isEnabled = !selectedOnlineItems.isEmpty
             menu.insertItem(stash, at: max(0, menu.items.count - 1))
+            let paste = NSMenuItem(title: L10n.text("filePaste.title"), action: #selector(pasteSelectionInPreviousApp), keyEquivalent: "")
+            StashShortcut.paste.chord(in: preferences).apply(to: paste)
+            paste.target = self
+            paste.isEnabled = stash.isEnabled
+            menu.insertItem(paste, at: max(0, menu.items.count - 1))
             let exclude = NSMenuItem(title: L10n.text("ctx.exclude"), action: #selector(excludeSelected), keyEquivalent: "")
             exclude.target = self
             menu.insertItem(exclude, at: max(0, menu.items.count - 1))
         }
         return menu
     }
+    func captureFilePasteDestination() {
+        if !snapshot { filePaste.captureDestination() }
+    }
+
+    @objc private func pasteSelectionInPreviousApp() {
+        guard !snapshot, let panel = view.window as? SearchPanel else { return }
+        let urls = selectedOnlineItems.map { URL(fileURLWithPath: $0.path) }
+        filePaste.paste(urls, dismiss: { [weak self, weak panel] in
+            guard let self, self.selectedOnlineItems.map(\.path) == urls.map(\.path) else { return false }
+            return panel?.dismissForFilePaste() == true
+        }, failed: { [weak self] reason in
+            guard let self else { return }
+            if self.view.window?.isVisible == true {
+                self.footer.warning = true
+                self.footer.text = L10n.text("filePaste." + reason.rawValue)
+            } else { NSSound.beep() }
+        })
+    }
+
     func showStash() {
         hidePanel?()
         stashWindow.present()

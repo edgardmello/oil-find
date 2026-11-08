@@ -306,7 +306,7 @@ private struct SettingsForm: View {
                     }
                     ForEach(StashShortcut.allCases, id: \.self) { target in
                         HStack {
-                            Text(L10n.text(target == .add ? "settings.stashAddShortcut" : "settings.stashShowShortcut"))
+                            Text(target.settingsTitle)
                             Spacer()
                             ShortcutRecorder(model: model, stashShortcut: target).frame(width: 120, height: 24)
                         }
