@@ -3,10 +3,10 @@ import AppKit
 final class SearchAccessoryBar: FlippedView {
     private var chips: [ChromeButton] = []
     private var stashControls: [ChromeButton] = []
-    private var stashRows: [(NSTextField, ChromeButton)] = []
+    private let stashTable = InlineStashTable(frame: .zero)
 
     var desiredHeight: CGFloat {
-        (chips.isEmpty ? 0 : 32) + (stashControls.isEmpty ? 0 : 30 + CGFloat(stashRows.count) * 26)
+        (chips.isEmpty ? 0 : 32) + (stashControls.isEmpty ? 0 : 30 + stashTable.desiredHeight)
     }
 
     func setFilters(_ filters: [(String, () -> Void)]) {
@@ -14,25 +14,23 @@ final class SearchAccessoryBar: FlippedView {
         chips = filters.map { title, action in button(title, action: action) }
     }
 
-    func setStash(files: [StashedFile], total: Int, expanded: Bool, copy: @escaping () -> Void,
-                  open: @escaping () -> Void, remove: @escaping (UUID) -> Void) {
+    func setStash(files: [StashedFile], expanded: Bool, copy: @escaping () -> Void, open: @escaping () -> Void,
+                  dragging: @escaping (Bool) -> Void, leaveSearch: @escaping () -> Void, remove: @escaping (Set<UUID>) -> Void, menuDelegate: NSMenuDelegate) {
         stashControls.forEach { $0.removeFromSuperview() }
-        stashRows.forEach { $0.0.removeFromSuperview(); $0.1.removeFromSuperview() }
-        stashControls = []; stashRows = []
+        stashControls = []
+        stashTable.onRemove = remove
+        stashTable.onDragging = dragging
+        stashTable.onOpen = leaveSearch
+        stashTable.menuDelegate = menuDelegate
+        stashTable.update(files, visible: expanded)
+        stashTable.isHidden = !expanded || files.isEmpty
+        if stashTable.superview == nil { addSubview(stashTable) }
         guard expanded else { return }
-        if total > 0 { stashControls.append(button(L10n.text("panel.copyStash", String(total)), action: copy)) }
+        if !files.isEmpty { stashControls.append(button(L10n.text("panel.copyStash", String(files.count)), action: copy)) }
         stashControls.append(button(L10n.text("panel.openStashWindow"), action: open))
-        for file in files {
-            let label = Theme.label(12, .regular, .secondaryLabelColor)
-            label.stringValue = (file.path as NSString).lastPathComponent
-            label.toolTip = file.path
-            label.lineBreakMode = .byTruncatingMiddle
-            addSubview(label)
-            let removeButton = button(L10n.text("stash.remove"), action: { remove(file.id) })
-            removeButton.setAccessibilityLabel(L10n.text("panel.removeStashItem", label.stringValue))
-            stashRows.append((label, removeButton))
-        }
     }
+
+    func handleStashKey(_ event: NSEvent) -> Bool? { isHidden ? nil : stashTable.handleKey(event) }
 
     private func button(_ title: String, action: @escaping () -> Void) -> ChromeButton {
         let result = ChromeButton(title, style: .plain, size: 12, weight: .medium)
@@ -66,11 +64,6 @@ final class SearchAccessoryBar: FlippedView {
         var y: CGFloat = 0
         if !chips.isEmpty { row(chips, y: y); y += 32 }
         if !stashControls.isEmpty { row(stashControls, y: y); y += 30 }
-        for (label, button) in stashRows {
-            let width = ceil(Theme.textWidth(button.title, font: button.font!)) + 16
-            label.frame = NSRect(x: 24, y: y + 5, width: max(0, bounds.width - width - 48), height: 17)
-            button.frame = NSRect(x: bounds.width - 18 - width, y: y, width: width, height: 24)
-            y += 26
-        }
+        stashTable.frame = NSRect(x: 18, y: y, width: max(0, bounds.width - 36), height: stashTable.desiredHeight)
     }
 }
