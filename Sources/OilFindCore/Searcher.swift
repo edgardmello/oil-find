@@ -57,7 +57,7 @@ private struct DriverNeedle {
     var caseSensitive: Bool = false
 }
 private enum AtomTag: UInt8 {
-    case name, path, glob, regex, ext, kind, filesOnly, foldersOnly, fileName, folderName, size, modified, tag, hidden
+    case name, fuzzyName, path, glob, regex, ext, kind, filesOnly, foldersOnly, fileName, folderName, size, modified, tag, hidden
 }
 private struct ByteSpan {
     var bytes: UnsafePointer<UInt8>?
@@ -383,6 +383,8 @@ public enum Searcher {
                 case .name(let n, let cs):
                     hot.tag = .name; hot.bytes = plan.bytes(n); hot.length = n.count; hot.flag = cs; hot.ascii = n.allSatisfy { $0 < 128 }
                     hot.excludesRootAncestor = atom.excludesAncestors && rootComponents.contains(n)
+                case .fuzzyName(let needle):
+                    hot.tag = .fuzzyName; hot.bytes = plan.bytes(needle); hot.length = needle.count
                 case .path(let c):
                     var normalized = c
                     if store.rootPath != "/" && c.count >= rootComponents.count && c.prefix(rootComponents.count).elementsEqual(rootComponents, by: { $0 == $1 }) { normalized = [[]] + c.dropFirst(rootComponents.count) }
@@ -784,6 +786,13 @@ public enum Searcher {
                 }
             }
             return AtomMatch(matched: match.0, baseScore: match.1, needleLength: match.2)
+        case .fuzzyName:
+            let contiguous = scoreNeeded ? sift_match_quality(name.baseAddress, name.count, atom.bytes, atom.length, 0) : 0
+            if contiguous > 0 {
+                return AtomMatch(matched: true, baseScore: Int(contiguous) * 200 + 200, needleLength: atom.length)
+            }
+            let score = Int(sift_fuzzy_name_score(name.baseAddress, name.count, atom.bytes, atom.length))
+            return AtomMatch(matched: score > 0, baseScore: scoreNeeded ? score : 0, needleLength: atom.length)
         case .fileName:
             if store.kind[i] == 1 { return AtomMatch(matched: false, baseScore: 0, needleLength: 0) }
             let match = matchNameHot(name, needle: UnsafeBufferPointer(start: atom.bytes, count: atom.length), cs: false, ascii: atom.ascii, id: id, pinyin: options.pinyin, store: store, scratch: scratch, scoreNeeded: scoreNeeded)

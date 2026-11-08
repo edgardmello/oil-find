@@ -146,6 +146,16 @@ final class M1Tests: XCTestCase {
         }
         for s in ["foo:bar","size:abc","dm:not-a-date"] { if case .name = Query.parse(s).clauses[0].alternatives[0].matcher {} else { XCTFail("expected fallback \(s)") } }
     }
+    func testFuzzyFilenameSearchCombinesWithFiltersAndPreservesNormalSearch() throws { try withFixture { f in
+        XCTAssertTrue(f.ids("pht").isEmpty)
+        XCTAssertEqual(f.ids("fuzzy:PHT ext:jpg"), Set(["photo10.jpg", "photo2.jpg"].map { f.root.appendingPathComponent($0).path }))
+        XCTAssertEqual(f.ids("fuzzy:项文 ext:md"), [f.root.appendingPathComponent("项目/项目文档.md").path])
+        XCTAssertTrue(f.ids("fuzzy:thp ext:jpg").isEmpty)
+        XCTAssertEqual(f.ids("fuzzy:pht ext:jpg !fuzzy:ht1"), [f.root.appendingPathComponent("photo2.jpg").path])
+        let result = try XCTUnwrap(Searcher.search(Query.parse("fuzzy:readme"), in: f.store))
+        XCTAssertEqual(f.store.name(result.items[0]), "README.md")
+    } }
+
     func testT9SearchMatchers() throws { try withFixture { f in
         let all=(0..<f.store.count).map { f.store.path(UInt32($0)) }
         func isDirectory(_ path: String) -> Bool { ((try? FileManager.default.attributesOfItem(atPath:path)[.type]) as? FileAttributeType) == .typeDirectory }
