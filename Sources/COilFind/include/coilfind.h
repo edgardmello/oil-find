@@ -7,6 +7,7 @@ typedef struct { uint32_t start, count; } SiftBloomSpan;
 size_t sift_filter_bloom(const uint8_t *blocks, size_t stride, uint32_t first, uint32_t end,
                          const uint32_t *bits, const SiftBloomSpan *terms,
                          const SiftBloomSpan *clauses, size_t clause_count, uint32_t *out);
+int sift_fuzzy_name_score(const uint8_t *name, size_t length, const uint8_t *needle, size_t needle_length);
 int sift_contains_unicode_folded(const uint8_t *text, size_t length, const uint8_t *needle, size_t needle_length);
 long sift_find(const uint8_t *hay, size_t len, size_t from, const uint8_t *needle, size_t nlen, int cs);
 size_t sift_scan_entries(const uint8_t *blob, const uint32_t *off, uint32_t e0, uint32_t e1, const uint8_t *needle, size_t nlen, int cs, uint32_t *out, size_t cap, uint32_t *resume);

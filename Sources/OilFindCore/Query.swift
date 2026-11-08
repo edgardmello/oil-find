@@ -185,6 +185,7 @@ public struct QueryDiagnostic: Equatable {
 }
 public enum Matcher {
     case name(needle: [UInt8], caseSensitive: Bool)
+    case fuzzyName([UInt8])
     case path(components: [[UInt8]])
     case subtree(String)
     case hidden
@@ -220,6 +221,7 @@ private func parseMatcher(_ body: String, now: Date, home: String, diagnostic: i
         case "size": if let range = parseSize(value) { return .size(range) }; diagnostic = QueryDiagnostic(kind: .size)
         case "dm": if let range = parseDate(value, now: now) { return .modified(range) }; diagnostic = QueryDiagnostic(kind: .date)
         case "path": return .path(components: pathComponents(value.lowercased(), home: home))
+        case "fuzzy" where !value.isEmpty: return .fuzzyName(Array(value.lowercased().utf8))
         case "case": return .name(needle: Array(value.utf8), caseSensitive: true)
         case "tag": return .tag(value.trimmingCharacters(in: .whitespaces))
         case "regex":
