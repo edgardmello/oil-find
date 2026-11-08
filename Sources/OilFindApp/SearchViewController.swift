@@ -31,6 +31,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private var coverageExplanation: CoverageExplanation?
     private let snapshot: Bool
     private let preferences: UserDefaults
+    private lazy var fileStash = FileStash(preferences: preferences)
+    private lazy var stashWindow = StashWindow(stash: fileStash)
     private let queue = DispatchQueue(label: "com.oiloil.find.search", qos: .userInteractive)
     private let coverageQueue = DispatchQueue(label: "com.oiloil.find.searchCoverage", qos: .utility)
     private let generation = SearchGeneration(), cache = SearchCache()
@@ -724,6 +726,15 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if flags.intersection([.command, .control, .option, .shift]) == [.control, .option],
            let slot = Int(key), (1...9).contains(slot), !event.isARepeat,
            applyQuickFilter(at: slot - 1) { return true }
+        let modifiers = flags.intersection([.command, .control, .option, .shift])
+        if key == "s", modifiers == [.control, .option] {
+            if !event.isARepeat { stashSelection() }
+            return true
+        }
+        if key == "s", modifiers == [.command, .shift] {
+            if !event.isARepeat { showStash() }
+            return true
+        }
         // A nonactivating panel has no Edit menu to dispatch text shortcuts.
         if flags.intersection([.command, .control, .option, .shift]) == .command,
            let editor = searchField.input.currentEditor() {
@@ -1011,12 +1022,34 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             menu.insertItem(openWith, at: 1)
         }
         if results.selectedItem != nil {
+            let stash = NSMenuItem(title: L10n.text("stash.add"), action: #selector(stashSelection), keyEquivalent: "s")
+            stash.keyEquivalentModifierMask = [.control, .option]
+            stash.target = self
+            stash.isEnabled = !selectedOnlineItems.isEmpty
+            menu.insertItem(stash, at: max(0, menu.items.count - 1))
             let exclude = NSMenuItem(title: L10n.text("ctx.exclude"), action: #selector(excludeSelected), keyEquivalent: "")
             exclude.target = self
             menu.insertItem(exclude, at: max(0, menu.items.count - 1))
         }
         return menu
     }
+    func showStash() {
+        hidePanel?()
+        stashWindow.present()
+    }
+
+    @objc private func stashSelection() {
+        let urls = selectedOnlineItems.map { URL(fileURLWithPath: $0.path) }
+        guard !urls.isEmpty else { return }
+        fileStash.add(urls) { [weak self] count in
+            guard let self, self.view.window?.isVisible == true else { return }
+            self.footer.warning = false
+            self.footer.text = count > 0
+                ? L10n.text("stash.added", Presentation.countText(count))
+                : L10n.text("stash.nothingAdded")
+        }
+    }
+
     @objc private func excludeSelected() {
         guard !snapshot, stateView == nil else { return }
         let paths = results.selectedItems.filter { $0.path != $0.source.store.rootPath }.map(\.path)
