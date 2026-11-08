@@ -453,9 +453,15 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         accessories.setFilters(chips)
         let files = snapshot ? [] : fileStash.files
         footer.stashCount = files.count
-        accessories.setStash(files: Array(files.prefix(3)), total: files.count, expanded: stashExpanded,
+        accessories.setStash(files: files, expanded: stashExpanded,
                              copy: { [weak self] in self?.copyStash() }, open: { [weak self] in self?.showStash() },
-                             remove: { [weak self] id in self?.fileStash.remove([id]); self?.refreshAccessories() })
+                             dragging: { [weak self] active in
+                                 self?.dragging = active
+                                 if !active { self?.hideIfInactive() }
+                             },
+                             leaveSearch: { [weak self] in self?.hidePanel?() },
+                             remove: { [weak self] ids in self?.fileStash.remove(ids); self?.refreshAccessories() },
+                             menuDelegate: self)
         accessories.needsLayout = true
         view.needsLayout = true
     }
@@ -811,6 +817,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let command = flags.contains(.command), option = flags.contains(.option)
         if searchField.editor.hasMarkedText() { return false }
+        if let handled = accessories.handleStashKey(event) { return handled }
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
         if flags.intersection([.command, .control, .option, .shift]) == [.control, .option],
            let slot = Int(key), (1...9).contains(slot), !event.isARepeat,
@@ -1153,6 +1160,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             exclude.target = self
             menu.insertItem(exclude, at: max(0, menu.items.count - 1))
         }
+        let copyFiles = menu.addItem(withTitle: L10n.text("ctx.copyFiles"), action: #selector(copySelectedFiles), keyEquivalent: "")
+        copyFiles.target = self
+        copyFiles.isEnabled = !selectedOnlineItems.isEmpty && selectedOnlineItems.count == results.selectedItems.count
+        let duplicate = menu.addItem(withTitle: L10n.text("ctx.duplicate"), action: #selector(duplicateSelectedFiles), keyEquivalent: "")
+        duplicate.target = self
+        duplicate.isEnabled = copyFiles.isEnabled
         let items = menu.items.filter { !$0.isSeparatorItem }
         menu.removeAllItems()
         func group(_ key: String, where predicate: (NSMenuItem) -> Bool) {
@@ -1167,14 +1180,34 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
         group("panel.actionsOrganize") {
             $0.action == #selector(scopeToSelection) || $0.action == #selector(stashSelection) ||
-            $0.action == #selector(excludeSelected) || $0.action == #selector(contextAction(_:)) && $0.tag == 7
+            $0.action == #selector(excludeSelected) || $0.action == #selector(duplicateSelectedFiles) || $0.action == #selector(contextAction(_:)) && $0.tag == 7
         }
         group("panel.actionsCopy") {
-            $0.action == #selector(pasteSelectionInPreviousApp) || $0.action == #selector(contextAction(_:)) && (4...5).contains($0.tag)
+            $0.action == #selector(pasteSelectionInPreviousApp) || $0.action == #selector(copySelectedFiles) || $0.action == #selector(contextAction(_:)) && (4...5).contains($0.tag)
         }
         group("fileScripts.title") { $0.hasSubmenu }
         return menu
     }
+    @objc private func copySelectedFiles() {
+        let urls = selectedOnlineItems.map { URL(fileURLWithPath: $0.path) }
+        guard !urls.isEmpty, urls.count == results.selectedItems.count else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects(urls.map { $0 as NSURL })
+    }
+
+    @objc private func duplicateSelectedFiles() {
+        let urls = selectedOnlineItems.map { URL(fileURLWithPath: $0.path) }
+        guard !snapshot, !urls.isEmpty, urls.count == results.selectedItems.count else { return }
+        NSWorkspace.shared.duplicate(urls) { [weak self] copies, error in
+            DispatchQueue.main.async {
+                self?.footer.warning = error != nil
+                self?.footer.text = error == nil
+                    ? L10n.text("ctx.duplicated", String(copies.count))
+                    : L10n.text("ctx.duplicateFailed", String(copies.count), String(urls.count))
+            }
+        }
+    }
+
     private func fileScriptsMenu() -> NSMenu? {
         let scripts = FileScript.load(from: preferences)
         guard !scripts.isEmpty else { return nil }
