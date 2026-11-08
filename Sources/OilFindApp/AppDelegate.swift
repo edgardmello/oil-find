@@ -166,6 +166,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rescanItem = item("menu.rescan", #selector(rescan))
         menu.addItem(.separator())
         loginItem = item("menu.loginItem", #selector(toggleLogin))
+        let stashItem = item("stash.title", #selector(showStash), "s")
+        stashItem.keyEquivalentModifierMask = [.command, .shift]
         settingsItem = item("menu.settings", #selector(showSettings), ",")
         refreshExtensionMenu()
         menu.addItem(.separator())
@@ -194,6 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if hotKey != nil { welcomeController?.model.updateShortcut(keyCode, modifiers) }
         return hotKey != nil
     }
+    @objc private func showStash() { panel.searchController.showStash() }
     @objc func showSettings() { presentSettings() }
     private func presentSettings() {
         topics.refreshProviderAvailability()
