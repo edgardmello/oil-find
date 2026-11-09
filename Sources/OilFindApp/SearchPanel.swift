@@ -82,6 +82,7 @@ private final class WindowFade: NSAnimation, NSAnimationDelegate {
 }
 
 final class SearchPanel: NSPanel {
+    static let collapsedHeight: CGFloat = 64
     let searchController: SearchViewController
     private(set) var hiding = false
     private var animationGeneration = 0
@@ -117,7 +118,7 @@ final class SearchPanel: NSPanel {
         let visible = screen.visibleFrame
         let width = min(searchController.inlinePreviewVisible && !searchController.barCollapsed ? 1160 : 800, visible.width - 80)
         let expandedHeight = min(560, visible.height - 120)
-        let height = searchController.barCollapsed ? 64 : expandedHeight
+        let height = searchController.barCollapsed ? Self.collapsedHeight : expandedHeight
         let top = (visible.midY + expandedHeight / 2).rounded()
         let frame = NSRect(x: (visible.midX - width / 2).rounded(), y: top - height,
                            width: width, height: height)

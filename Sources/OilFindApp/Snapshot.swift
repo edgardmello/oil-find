@@ -26,7 +26,7 @@ enum Snapshot {
         defer { L10n.snapshotChinese = nil }
         appExtension?.languageDidChange(chinese: L10n.chinese)
         let state = values["--state"] ?? "results"
-        guard ["results", "stash", "recent", "empty", "indexing", "welcome", "toast", "settings", "menu", "no-access", "diagnostic", "syntax", "update-available", "update-downloading", "update-failed", "update-latest"].contains(state) else { throw SnapshotError.failed("Invalid state: \(state)") }
+        guard ["search-bar", "results", "stash", "recent", "empty", "indexing", "welcome", "toast", "settings", "menu", "no-access", "diagnostic", "syntax", "update-available", "update-downloading", "update-failed", "update-latest"].contains(state) else { throw SnapshotError.failed("Invalid state: \(state)") }
         let appearance = values["--appearance"] ?? "light"
         guard ["light", "dark"].contains(appearance) else { throw SnapshotError.failed("Invalid appearance: \(appearance)") }
         let filter = values["--filter"] ?? "all"
@@ -35,7 +35,7 @@ enum Snapshot {
         let sorts: [String: SortKey] = ["relevance": .relevance, "name": .name, "modified": .modified, "size": .size]
         guard let key = sorts[sort], let selection = Int(values["--select"] ?? "0"), selection >= 0 else { throw SnapshotError.failed("Invalid sort or selected row") }
         var store: IndexStore?
-        if filter != "additional" && !state.hasPrefix("update-") && !["indexing", "welcome", "settings", "menu"].contains(state) || (state == "settings" && values["--db"] != nil) {
+        if filter != "additional" && !state.hasPrefix("update-") && !["search-bar", "indexing", "welcome", "settings", "menu"].contains(state) || (state == "settings" && values["--db"] != nil) {
             let fallback = NSHomeDirectory() + "/Library/Caches/Oil Find/cli-index.oilfind"
             let defaultPath = FileManager.default.fileExists(atPath: AppDelegate.dbURL.path) ? AppDelegate.dbURL.path : fallback
             let db = NSString(string: values["--db"] ?? defaultPath).expandingTildeInPath
@@ -152,6 +152,14 @@ enum Snapshot {
         let panel = SearchPanel(snapshot: true)
         panel.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
         let controller = panel.searchController
+        if state == "search-bar" {
+            controller.prepareCollapsedBarSnapshot()
+            let view = controller.view
+            view.frame = NSRect(x: 0, y: 0, width: Theme.panelSize.width, height: SearchPanel.collapsedHeight)
+            view.layoutSubtreeIfNeeded()
+            try write(view: view, appearance: panel.appearance, output: output)
+            return
+        }
         controller.supplementaryProvider = appExtension?.supplementarySearchProvider
         controller.additionalSearchProvider = topicSearch
         try controller.prepareSnapshot(state: state, query: values["--query"] ?? "readme", options: SearchOptions(sort: key, ascending: key == .name, kind: kind == 0 || filter == "additional" ? nil : UInt8(kind)), store: store, selection: selection, additionalSources: externalDrives.searchSources() + (appExtension?.searchSources() ?? []), additionalOnly: filter == "additional")

@@ -24,7 +24,7 @@ final class SearchAccessoryTests: XCTestCase {
         window.orderFrontRegardless()
         defer { window.close() }
         try controller.prepareSnapshot(state: "results", query: "stash-example", options: .init(), store: store, selection: 0)
-        let bar = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? SearchAccessoryBar }.first)
+        let bar = try XCTUnwrap(controller.panelBody.subviews.compactMap { $0 as? SearchAccessoryBar }.first)
         XCTAssertEqual(bar.desiredHeight, 0)
 
         XCTAssertTrue(app.sendAction(NSSelectorFromString("stashSelection"), to: controller, from: nil))
@@ -113,7 +113,7 @@ final class SearchAccessoryTests: XCTestCase {
                                 folder: "/Clients", volume: nil, hiddenOnly: true)], to: preferences)
 
         let controller = SearchViewController(snapshot: true, preferences: preferences)
-        let view = controller.view
+        _ = controller.view
         controller.searchField.text = "keep this text"
         let quick = try XCTUnwrap(controller.filters.savedMenu?())
         let apply = try XCTUnwrap(quick.items.first { $0.title == L10n.text("quickFilter.refine") }?.submenu?.items.first)
@@ -121,7 +121,7 @@ final class SearchAccessoryTests: XCTestCase {
         XCTAssertEqual(controller.searchField.text, "keep this text")
         XCTAssertEqual(controller.filters.options.kind, Query.kindValue("doc"))
 
-        let bar = try XCTUnwrap(view.subviews.compactMap { $0 as? SearchAccessoryBar }.first)
+        let bar = try XCTUnwrap(controller.panelBody.subviews.compactMap { $0 as? SearchAccessoryBar }.first)
         XCTAssertEqual(bar.desiredHeight, 32)
         let clear = try XCTUnwrap(bar.subviews.compactMap { $0 as? ChromeButton }.first {
             $0.title == L10n.text("panel.clearFilters")
