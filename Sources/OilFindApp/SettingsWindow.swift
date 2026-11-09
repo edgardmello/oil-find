@@ -208,7 +208,7 @@ final class SettingsModel: ObservableObject {
                     guard isExecutable else { self.fileScriptError = L10n.text("fileScripts.notExecutable"); return }
                     self.fileScriptError = nil
                     let script = FileScript(url: url)
-                    if !self.fileScripts.contains(script) {
+                    if !self.fileScripts.contains(where: { $0.id == script.id }) {
                         self.fileScripts.append(script)
                         FileScript.save(self.fileScripts, to: self.preferences)
                     }
@@ -218,7 +218,17 @@ final class SettingsModel: ObservableObject {
     }
 
     func removeFileScript(_ script: FileScript) {
-        fileScripts.removeAll { $0 == script }
+        fileScripts.removeAll { $0.id == script.id }
+        FileScript.save(fileScripts, to: preferences)
+    }
+
+    func scriptEligibility(_ id: FileScript.ID) -> FileScript.Eligibility {
+        fileScripts.first { $0.id == id }?.eligibility ?? .init()
+    }
+
+    func updateScriptEligibility(_ id: FileScript.ID, _ eligibility: FileScript.Eligibility) {
+        guard let index = fileScripts.firstIndex(where: { $0.id == id }) else { return }
+        fileScripts[index].eligibility = eligibility
         FileScript.save(fileScripts, to: preferences)
     }
 
@@ -347,7 +357,7 @@ private struct SettingsForm: View {
     var window: () -> NSWindow?
     @State var page: SettingsPage
     @State private var shortcutQuery = ""
-    @State private var selectedScript: FileScript?
+    @State private var selectedScriptID: FileScript.ID?
 
     private func preference(_ key: String, default fallback: Bool = false) -> Binding<Bool> {
         Binding(get: { model.preferences.object(forKey: key) as? Bool ?? fallback }, set: { value in
@@ -570,9 +580,32 @@ private struct SettingsForm: View {
                 option("settings.actionBar.hints", help: "settings.actionBar.hintsHelp", value: preference("showActionHints", default: true))
                 option("footer.openWith", help: "settings.actionBar.appsHelp", value: preference("showOpenWithRow", default: true))
             }
+            Section {
+                ForEach(PinnedFileAction.allCases, id: \.rawValue) { action in
+                    Toggle(action.title, isOn: Binding(
+                        get: { PinnedFileAction.selected(in: model.preferences).contains(action) },
+                        set: { enabled in
+                            var pinned = Set(PinnedFileAction.selected(in: model.preferences))
+                            if enabled { pinned.insert(action) } else { pinned.remove(action) }
+                            model.objectWillChange.send()
+                            model.preferences.set(PinnedFileAction.allCases.filter(pinned.contains).map(\.rawValue),
+                                                  forKey: PinnedFileAction.preferenceKey)
+                            model.onSearchSettingsChange?(PinnedFileAction.preferenceKey)
+                        }
+                    ))
+                }
+            } header: {
+                Text(L10n.text("settings.actionBar.pinned"))
+            } footer: {
+                hint(L10n.text("settings.actionBar.pinnedHelp"))
+            }
             Section(L10n.text("settings.actionBar.preview")) {
                 HStack(spacing: 12) {
-                    if preference("showActionHints", default: true).wrappedValue {
+                    let pinned = preference("compactResults").wrappedValue
+                        ? PinnedFileAction.selected(in: model.preferences) : []
+                    if !pinned.isEmpty {
+                        ForEach(pinned, id: \.rawValue) { Text($0.title) }
+                    } else if preference("showActionHints", default: true).wrappedValue {
                         Label(L10n.text("hint.open"), systemImage: "return")
                         Label(L10n.text("hint.preview"), systemImage: "eye")
                     }
@@ -702,7 +735,7 @@ private struct SettingsForm: View {
                 ForEach(model.fileScripts) { script in
                     Button {
                         model.cancelRecording()
-                        selectedScript = script
+                        selectedScriptID = script.id
                     } label: {
                         HStack {
                             Label(script.name, systemImage: "doc.text")
@@ -735,10 +768,27 @@ private struct SettingsForm: View {
                         Button(L10n.text("fileScripts.remove", script.name), role: .destructive) {
                             model.cancelRecording()
                             model.removeFileScript(script)
-                            selectedScript = nil
+                            selectedScriptID = nil
                         }
                     }
                 }.id(script.id)
+                Section(L10n.text("settings.scripts.eligibility")) {
+                    TextField(L10n.text("settings.filters.extensions"),
+                              text: scriptRule(script.id, \.extensions), prompt: Text("pdf, png"))
+                    let minimum = scriptRule(script.id, \.minimum)
+                    let maximum = scriptRule(script.id, \.maximum)
+                    Stepper(L10n.text("settings.scripts.minimum", String(minimum.wrappedValue)),
+                            value: minimum, in: 1...max(1, maximum.wrappedValue == 0 ? 999 : maximum.wrappedValue))
+                    Toggle(L10n.text("settings.scripts.limit"), isOn: Binding(
+                        get: { maximum.wrappedValue != 0 },
+                        set: { maximum.wrappedValue = $0 ? minimum.wrappedValue : 0 }
+                    ))
+                    if maximum.wrappedValue != 0 {
+                        Stepper(L10n.text("settings.scripts.maximum", String(maximum.wrappedValue)),
+                                value: maximum, in: minimum.wrappedValue...999)
+                    }
+                    Toggle(L10n.text("settings.scripts.filesOnly"), isOn: scriptRule(script.id, \.filesOnly))
+                }
             }
         case .extensions:
             if let appExtension { appExtension.settingsSection(window: window) }
@@ -762,8 +812,16 @@ private struct SettingsForm: View {
               footer: { hint(L10n.text("settings.excludedTypesHint")) }
         }
     }
+    private func scriptRule<Value>(_ id: FileScript.ID, _ key: WritableKeyPath<FileScript.Eligibility, Value>) -> Binding<Value> {
+        Binding(get: { model.scriptEligibility(id)[keyPath: key] }, set: { value in
+            var eligibility = model.scriptEligibility(id)
+            eligibility[keyPath: key] = value
+            model.updateScriptEligibility(id, eligibility)
+        })
+    }
+
     private var activeScript: FileScript? {
-        selectedScript.flatMap { model.fileScripts.contains($0) ? $0 : nil } ?? model.fileScripts.first
+        model.fileScripts.first { $0.id == selectedScriptID } ?? model.fileScripts.first
     }
 
     private func coverageBinding(_ key: String) -> Binding<Bool> {

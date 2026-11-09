@@ -13,6 +13,19 @@ final class FileScriptTests: XCTestCase {
         return (directory, FileScript(url: executable), file)
     }
 
+    func testScriptRulesRequireMatchingFilesAndSelectionSize() throws {
+        let script = try JSONDecoder().decode(FileScript.self, from: Data(#"{"path":"/tmp/compare.sh"}"#.utf8))
+        XCTAssertNil(script.eligibility)
+        let rules = FileScript.Eligibility(extensions: ".PDF", minimum: 2, maximum: 2, filesOnly: true)
+        let first = (URL(fileURLWithPath: "/tmp/first.pdf"), false)
+        let second = (URL(fileURLWithPath: "/tmp/second.PDF"), false)
+        XCTAssertTrue(rules.matches([first, second]))
+        XCTAssertFalse(rules.matches([first]))
+        XCTAssertFalse(rules.matches([first, second, second]))
+        XCTAssertFalse(rules.matches([first, (URL(fileURLWithPath: "/tmp/folder.pdf"), true)]))
+        XCTAssertFalse(rules.matches([first, (URL(fileURLWithPath: "/tmp/other.png"), false)]))
+    }
+
     func testPassesPathsLiterallyAndReportsExitCodeAndStderr() throws {
         let (directory, script, file) = try fixture("""
         printf '%s\\n' "$#"

@@ -136,6 +136,27 @@ private final class SearchPlan {
         ownedMasks.append(inside)
         return UnsafePointer(inside)
     }
+    func savedPathMask(store: IndexStore, paths: [String], includeRoots: Bool) -> UnsafePointer<UInt8> {
+        let inside = UnsafeMutablePointer<UInt8>.allocate(capacity: store.count)
+        inside.initialize(repeating: 0, count: store.count)
+        for path in paths {
+            let root = path == "/" || store.rootPath == path || store.rootPath.hasPrefix(path + "/")
+            guard let id = root ? 0 : store.indexedID(forPath: path),
+                  includeRoots || store.flags[Int(id)] & SiftFlag.dir != 0 else { continue }
+            inside[Int(id)] = 1
+        }
+        // Parents precede their descendants. Mark roots separately so folder-only scopes omit the roots.
+        for index in 1..<store.count {
+            if inside[Int(store.parent[index])] != 0 {
+                inside[index] |= 2
+            }
+        }
+        if !includeRoots {
+            for index in 0..<store.count { inside[index] >>= 1 }
+        }
+        ownedMasks.append(inside)
+        return UnsafePointer(inside)
+    }
     func descendantMask(store: IndexStore, components: UnsafePointer<ByteSpan>, count: Int) -> UnsafePointer<UInt8> {
         let inside = UnsafeMutablePointer<UInt8>.allocate(capacity: store.count)
         let dirMatch = UnsafeMutablePointer<UInt8>.allocate(capacity: store.count)
@@ -400,6 +421,9 @@ public enum Searcher {
                     if normalized.count >= 2 && normalized.last!.isEmpty { hot.pathMask = plan.descendantMask(store: store, components: hot.components!, count: normalized.count) }
                 case .subtree(let path):
                     hot.tag = .path; hot.pathMask = plan.subtreeMask(store: store, path: path)
+                case .savedPaths(let paths, let includeRoots):
+                    hot.tag = .path
+                    hot.pathMask = plan.savedPathMask(store: store, paths: paths, includeRoots: includeRoots)
                 case .glob(let p, let onPath): hot.tag = .glob; hot.bytes = plan.bytes(p); hot.length = p.count; hot.flag = onPath
                 case .regex(let r, let onPath):
                     hot.tag = .regex; hot.regexIndex = plan.regexes.count; plan.regexes.append(r); hot.flag = onPath

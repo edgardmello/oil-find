@@ -12,6 +12,8 @@ struct ExternalDriveSettings: View {
                 .accessibilityIdentifier("external-drives.enabled")
             Text(text("drivesDescription")).font(.footnote).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Toggle(text("settings.drives.autoNew"), isOn: Binding(get: { catalog.autoIndexNew }, set: catalog.setAutoIndexNew))
+            Text(text("settings.drives.autoNewHelp")).font(.footnote).foregroundStyle(.secondary)
             if catalog.ready && catalog.rows.isEmpty {
                 Text(text("drivesEmpty")).font(.footnote).foregroundStyle(.secondary)
             }
@@ -23,6 +25,9 @@ struct ExternalDriveSettings: View {
                         Text(row.record.name).lineLimit(1).truncationMode(.middle).help(row.record.path)
                         Text(status(row)).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
                     }.frame(maxWidth: .infinity, alignment: .leading)
+                    if row.status == .connected {
+                        Button(text("settings.drives.reindex")) { catalog.reindex(row.id) }
+                    }
                     Button(text("driveRemoveAction")) { catalog.confirmRemove(row, window: window()) }
                         .buttonStyle(.borderless)
                     Toggle(row.record.name, isOn: Binding(get: { row.record.enabled }, set: { catalog.setDriveEnabled(row.id, $0) }))

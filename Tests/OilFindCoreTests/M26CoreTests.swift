@@ -52,6 +52,30 @@ final class M26CoreTests: XCTestCase {
                                         config: .init(rootPath: first.store.rootPath), store: first.store), .missing)
     }
 
+    func testSavedCriteriaCombineFoldersExtensionsAndExactExclusions() throws {
+        let root = try root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        for path in ["A/first.pdf", "A/skip.pdf", "A/Hidden/nested.pdf", "B/second.pdf", "B/notes.txt", "C/other.pdf"] {
+            let url = root.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data().write(to: url)
+        }
+        let config = IndexConfig(rootPath: root.path)
+        let store = IndexStore(scan: try XCTUnwrap(Scanner(config: config, threads: 1).run()), config: config)
+        let criteria = Query.SavedCriteria(
+            folders: ["A", "B"].map { root.appendingPathComponent($0).path },
+            extensions: ["pdf"],
+            exclusions: ["A/skip.pdf", "A/Hidden"].map { root.appendingPathComponent($0).path }
+        )
+        let query = Query.parse("").applying(criteria)
+        let result = try XCTUnwrap(Searcher.search(query, options: .init(), in: store))
+        XCTAssertEqual(Set(result.items.map { id in store.read { store.name(id) } }), ["first.pdf", "second.pdf"])
+        let cache = SearchCache()
+        cache.insert(result)
+        XCTAssertNotNil(cache.lookup(query: query, options: .init(), store: store))
+        XCTAssertNil(cache.lookup(query: Query.parse(""), options: .init(), store: store))
+    }
+
     func testHiddenSearchUsesIndexedFlagsAndSeparateCacheEntries() throws {
         let root = try root()
         defer { try? FileManager.default.removeItem(at: root) }

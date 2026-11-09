@@ -98,10 +98,11 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private var sourceCaches: [String: SearchCache] = [:]
     private var sourceCacheStores: [String: ObjectIdentifier] = [:]
     private var folderScope: String?
+    private var savedCriteria: Query.SavedCriteria?
     private var volumeScope: String?
     private lazy var fuzzyNames = !snapshot && preferences.bool(forKey: "fuzzyNames")
     private var hiddenOnly = false
-    private var sortingRecent: Bool { !hiddenOnly && folderScope == nil && searchField.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var sortingRecent: Bool { !hiddenOnly && folderScope == nil && savedCriteria == nil && searchField.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var scopedSources: [SearchSource] {
         guard let volumeScope else { return searchSources }
         let sources = searchSources
@@ -197,6 +198,16 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                 self.footerShowsSelection = multiple
             }
         }
+        footer.onPinnedAction = { [weak self] action in
+            guard let self else { return }
+            switch action {
+            case .open: self.openSelected()
+            case .reveal: self.revealSelected()
+            case .preview: self.previewSelected()
+            case .copy: self.copySelectedFiles()
+            }
+        }
+        refreshPinnedActions()
         footer.onChooseApplication = { [weak self] in self?.chooseApplication() }
         footer.onOpenApplication = { [weak self] app in
             guard let self, let file = self.applicationSuggestionsFile else { return }
@@ -302,6 +313,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     func applySearchLink(_ link: SearchLink) {
         _ = view
         searchField.text = link.query
+        savedCriteria = nil
         folderScope = link.folder
         hiddenOnly = false
         volumeScope = link.volume.map { value in
@@ -369,6 +381,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     private func setResultsLayout(compact: Bool) {
         results.setCompact(compact)
+        refreshPinnedActions()
         refreshApplicationSuggestions()
     }
 
@@ -425,6 +438,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         guard saved.indices.contains(index) else { return false }
         let filter = saved[index]
         if restoreQuery { searchField.text = filter.query }
+        savedCriteria = filter.criteria
         folderScope = filter.folder
         volumeScope = filter.volume
         hiddenOnly = filter.hiddenOnly
@@ -469,7 +483,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             let filter = QuickFilter(name: title, query: self.searchField.text, kind: self.filters.options.kind,
                                      folder: self.folderScope, volume: self.volumeScope, hiddenOnly: self.hiddenOnly,
                                      fuzzyNames: self.fuzzyNames && !self.filters.additionalSelected,
-                                     sort: .init(key: self.filters.options.sort.rawValue, ascending: self.filters.options.ascending))
+                                     sort: .init(key: self.filters.options.sort.rawValue, ascending: self.filters.options.ascending), criteria: self.savedCriteria)
             var saved = QuickFilter.load(from: self.preferences)
             if let index = saved.firstIndex(where: { $0.name.caseInsensitiveCompare(title) == .orderedSame }) { saved[index] = filter }
             else { saved.append(filter) }
@@ -489,13 +503,14 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     @objc private func scopeToSelection() {
         guard let item = results.selectedItem, !multipleSelected else { return }
+        savedCriteria = nil
         folderScope = item.flags & SiftFlag.dir != 0 ? item.path : item.parentPath
         searchField.text = ""
         scopeChanged()
     }
 
     private func scopeChanged(resetAdditional: Bool = true) {
-        filters.scopeActive = folderScope != nil || volumeScope != nil
+        filters.scopeActive = folderScope != nil || volumeScope != nil || savedCriteria != nil
         filters.searchOptionsActive = hiddenOnly || fuzzyNames
         if resetAdditional && filters.additionalSelected { filters.select(0, notify: false) }
         refreshAdditionalFilter()
@@ -517,13 +532,19 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if let folderScope {
             chips.append(((folderScope as NSString).lastPathComponent + " ×", { [weak self] in self?.clearFolderScope() }))
         }
+        if savedCriteria != nil {
+            chips.append((L10n.text("settings.filters.criteria") + " ×", { [weak self] in
+                self?.savedCriteria = nil
+                self?.scopeChanged()
+            }))
+        }
         if hiddenOnly {
             chips.append((L10n.text("scope.hiddenOnly") + " ×", { [weak self] in self?.toggleHiddenOnly() }))
         }
         if chips.count > 1 {
             chips.append((L10n.text("panel.clearFilters"), { [weak self] in
                 guard let self else { return }
-                self.volumeScope = nil; self.folderScope = nil; self.hiddenOnly = false
+                self.volumeScope = nil; self.folderScope = nil; self.savedCriteria = nil; self.hiddenOnly = false
                 self.filters.select(0, notify: false)
                 self.scopeChanged()
             }))
@@ -586,6 +607,10 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
     }
 
+    private func refreshPinnedActions() {
+        footer.setPinnedActions(results.compact ? PinnedFileAction.selected(in: preferences) : [])
+    }
+
     func applySearchSetting(_ key: String) {
         guard isViewLoaded else { return }
         switch key {
@@ -596,6 +621,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             scopeChanged()
         case "showActionHints":
             footer.showActionHints = preferences.object(forKey: key) as? Bool ?? true
+        case PinnedFileAction.preferenceKey:
+            refreshPinnedActions()
         case "showOpenWithRow":
             refreshApplicationSuggestions()
         default:
@@ -616,7 +643,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     func panelWillShow() {
         if !snapshot { applySearchSetting("showActionHints") }
         refreshApplicationSuggestions()
-        filters.scopeActive = folderScope != nil || volumeScope != nil
+        filters.scopeActive = folderScope != nil || volumeScope != nil || savedCriteria != nil
         filters.searchOptionsActive = hiddenOnly || fuzzyNames
         refreshAccessories()
         additionalSearchProvider?.visibilityChanged(true)
@@ -628,6 +655,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if additionalSearchProvider?.isEnabled != true, let result = results.result, result.isCurrent(sources),
            (result.single != nil || result.multiple != nil || sources.isEmpty),
            result.query.raw == currentQuery.raw, result.query.folderScope == currentQuery.folderScope,
+           result.query.savedCriteria == currentQuery.savedCriteria,
            result.query.hiddenOnly == currentQuery.hiddenOnly, result.query.fuzzyNames == currentQuery.fuzzyNames, !currentQuery.isTimeDependent,
            Date().timeIntervalSince(result.createdAt) <= 600 { return }
         startSearch(preserveSelection: true)
@@ -685,7 +713,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let cancelled = { [generation] in !generation.current(token) }
         let supplementary = additionalOnly ? nil : supplementaryProvider?.prepareSearch(query, options: options, sources: sources, isCancelled: cancelled)
         let additional = additionalSearchProvider.flatMap { provider in
-            provider.isEnabled && (additionalOnly || options.kind == nil && folderScope == nil && volumeScope == nil && !hiddenOnly) ? provider.prepareSearch(query, isCancelled: cancelled) : nil
+            provider.isEnabled && (additionalOnly || options.kind == nil && folderScope == nil && savedCriteria == nil && volumeScope == nil && !hiddenOnly) ? provider.prepareSearch(query, isCancelled: cancelled) : nil
         }
         additionalSearchFailed = false
         additionalPending = !refresh && additional != nil
@@ -793,6 +821,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         })
         if !filters.additionalSelected {
             if let folderScope { query = query.restricted(toFolder: folderScope) }
+            if let savedCriteria { query = query.applying(savedCriteria) }
             if hiddenOnly { query = query.showingOnlyHiddenFiles() }
         }
         return query
@@ -849,7 +878,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     private func explainEmptyResult(_ result: SearchPresentation) {
         guard !snapshot, result.total == 0, diagnostics.isEmpty, !filters.additionalSelected,
-              folderScope == nil, volumeScope == nil, !hiddenOnly, let path = explicitPath else { return }
+              folderScope == nil, savedCriteria == nil, volumeScope == nil, !hiddenOnly, let path = explicitPath else { return }
         let sources = searchSources.filter { $0.id != "startup" }
         let manager = manager
         coverageQueue.async { [weak self, weak result] in
@@ -1055,6 +1084,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             else if StashShortcut.scripts.contains(action) {
                 let scripts = FileScript.load(from: preferences)
                 guard scripts.indices.contains(action.slot) else { return false }
+                guard scriptIsEligible(scripts[action.slot]) else { return false }
                 runFileScript(scripts[action.slot])
             } else { return false }
         }
@@ -1396,14 +1426,14 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let scripts = FileScript.load(from: preferences)
         guard !scripts.isEmpty else { return nil }
         let menu = NSMenu()
-        for (index, script) in scripts.enumerated() {
+        for (index, script) in scripts.enumerated() where scriptIsEligible(script) {
             let item = menu.addItem(withTitle: script.name, action: #selector(runFileScriptItem(_:)), keyEquivalent: "")
             if StashShortcut.scripts.indices.contains(index) { StashShortcut.scripts[index].chord(in: preferences).apply(to: item) }
             item.target = self
             item.representedObject = script.path
             item.toolTip = script.path
         }
-        return menu
+        return menu.items.isEmpty ? nil : menu
     }
 
     @objc private func runFileScriptItem(_ item: NSMenuItem) {
@@ -1412,14 +1442,19 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         runFileScript(script)
     }
 
+    private func scriptIsEligible(_ script: FileScript) -> Bool {
+        let items = selectedOnlineItems
+        guard !items.isEmpty, items.count == results.selectedItems.count,
+              items.count == results.selectionCount else { return false }
+        guard let eligibility = script.eligibility else { return true }
+        return eligibility.matches(items.map {
+            (URL(fileURLWithPath: $0.path), $0.flags & SiftFlag.dir != 0)
+        })
+    }
+
     private func runFileScript(_ script: FileScript) {
-        guard !snapshot else { return }
+        guard !snapshot, scriptIsEligible(script) else { return }
         let files = selectedOnlineItems.map { URL(fileURLWithPath: $0.path) }
-        guard !files.isEmpty, files.count == results.selectedItems.count else {
-            footer.warning = true
-            footer.text = L10n.text("fileScripts.unavailable")
-            return
-        }
         hidePanel?()
         if scriptWindow.isRunning { scriptWindow.present() }
         else { scriptWindow.start(script, files: files) }
