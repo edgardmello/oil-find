@@ -222,8 +222,14 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = menuDelegate
-        for (index, key) in ["ctx.open", "ctx.reveal", "ctx.copyFiles", "ctx.copyPath", "ctx.copyName", "stash.remove"].enumerated() {
+        for (index, key) in ["ctx.open", "ctx.reveal", "ctx.copyFiles", "ctx.copyPaths", "ctx.copyNames", "stash.remove"].enumerated() {
             if index == 2 || index == 5 { menu.addItem(.separator()) }
+            if index == 3 || index == 4 {
+                FileClipboardFormat.addMenu(to: menu, titleKey: key,
+                                            target: self, action: #selector(stashMenuAction(_:)),
+                                            baseTag: index == 3 ? 6 : 9)
+                continue
+            }
             let item = menu.addItem(withTitle: L10n.text(key), action: #selector(stashMenuAction(_:)), keyEquivalent: "")
             item.target = self
             item.tag = index
@@ -251,12 +257,11 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
             guard available.count == files.count else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.writeObjects(available.map { $0 as NSURL })
-        case 3, 4:
-            let paths = files.map { metadata[$0.id]?.url.path ?? $0.path }
-            let text = action == 3 ? paths : paths.map { ($0 as NSString).lastPathComponent }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text.joined(separator: "\n"), forType: .string)
         case 5: onRemove?(Set(files.map(\.id)))
+        case 6...11:
+            let paths = files.map { metadata[$0.id]?.url.path ?? $0.path }
+            let values = action < 9 ? paths : paths.map { ($0 as NSString).lastPathComponent }
+            FileClipboardFormat(rawValue: action % 3)?.copy(values)
         default: break
         }
     }

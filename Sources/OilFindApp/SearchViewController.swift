@@ -39,6 +39,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private var copyingStash = false
     private lazy var stashWindow = StashWindow(stash: fileStash)
     private let queue = DispatchQueue(label: "com.oiloil.find.search", qos: .userInteractive)
+    private let fileTransferQueue = DispatchQueue(label: "com.oiloil.find.fileTransfer", qos: .userInitiated)
     private let coverageQueue = DispatchQueue(label: "com.oiloil.find.searchCoverage", qos: .utility)
     private let generation = SearchGeneration(), cache = SearchCache()
     private var timer: Timer?
@@ -1166,71 +1167,101 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             }
             return menu
         }
-        for (i, key) in ["open", "reveal", "preview", "-", "copyPath", "copyName", "-", "trash"].enumerated() {
-            if key == "-" { menu.addItem(.separator()); continue }
-            let item = NSMenuItem(title: L10n.text("ctx." + key), action: #selector(contextAction(_:)), keyEquivalent: "")
-            item.target = self; item.tag = i
-            if i == 7 { item.isEnabled = results.selectedItem?.source.isOnline == true }
-            menu.addItem(item)
+        let selected = results.selectedItems
+        let onlineCount = selectedOnlineItems.count
+        let allOnline = onlineCount == selected.count
+        @discardableResult
+        func action(_ key: String, _ selector: Selector, enabled: Bool = true, tag: Int = 0) -> NSMenuItem {
+            let item = menu.addItem(withTitle: L10n.text(key), action: selector, keyEquivalent: "")
+            item.target = self
+            item.isEnabled = enabled
+            item.tag = tag
+            return item
         }
-        if results.selectedItem != nil && !multipleSelected {
-            menu.insertItem(.separator(), at: 3)
-            let scope = NSMenuItem(title: L10n.text("scope.inFolder"), action: #selector(scopeToSelection), keyEquivalent: "")
-            scope.target = self
-            menu.insertItem(scope, at: 4)
-            let openWith = NSMenuItem(title: L10n.text("ctx.openWith"), action: #selector(chooseApplication), keyEquivalent: "")
-            openWith.target = self
-            menu.insertItem(openWith, at: 1)
+        menu.autoenablesItems = false
+        guard !selected.isEmpty else { return menu }
+
+        action("ctx.open", #selector(contextAction(_:)), enabled: onlineCount > 0)
+        action("ctx.reveal", #selector(contextAction(_:)), enabled: onlineCount > 0, tag: 1)
+        action("ctx.preview", #selector(contextAction(_:)), enabled: selected.first?.source.isOnline == true, tag: 2)
+        if !multipleSelected {
+            menu.addItem(.separator())
+            action("ctx.openWith", #selector(chooseApplication), enabled: allOnline)
+            action("ctx.terminal", #selector(openSelectedInTerminal), enabled: allOnline)
+            action("scope.inFolder", #selector(scopeToSelection))
         }
-        if results.selectedItem != nil {
-            let stash = NSMenuItem(title: L10n.text("stash.add"), action: #selector(stashSelection), keyEquivalent: "")
-            StashShortcut.add.chord(in: preferences).apply(to: stash)
-            stash.target = self
-            stash.isEnabled = !selectedOnlineItems.isEmpty
-            menu.insertItem(stash, at: max(0, menu.items.count - 1))
-            let paste = NSMenuItem(title: L10n.text("filePaste.title"), action: #selector(pasteSelectionInPreviousApp), keyEquivalent: "")
-            StashShortcut.paste.chord(in: preferences).apply(to: paste)
-            paste.target = self
-            paste.isEnabled = stash.isEnabled
-            menu.insertItem(paste, at: max(0, menu.items.count - 1))
-            if let scripts = fileScriptsMenu() {
-                let item = NSMenuItem(title: L10n.text("fileScripts.run"), action: nil, keyEquivalent: "")
-                item.submenu = scripts
-                item.isEnabled = stash.isEnabled && selectedOnlineItems.count == results.selectedItems.count
-                menu.insertItem(item, at: max(0, menu.items.count - 1))
-            }
-            let exclude = NSMenuItem(title: L10n.text("ctx.exclude"), action: #selector(excludeSelected), keyEquivalent: "")
-            exclude.target = self
-            menu.insertItem(exclude, at: max(0, menu.items.count - 1))
+        menu.addItem(.separator())
+        action("ctx.duplicate", #selector(duplicateSelectedFiles), enabled: allOnline)
+        menu.addItem(.separator())
+        action("ctx.copyFiles", #selector(copySelectedFiles), enabled: allOnline)
+        FileClipboardFormat.addMenu(to: menu, titleKey: "ctx.copyPaths", target: self,
+                                    action: #selector(copySelectionText(_:)), baseTag: 0)
+        FileClipboardFormat.addMenu(to: menu, titleKey: "ctx.copyNames", target: self,
+                                    action: #selector(copySelectionText(_:)), baseTag: 3)
+        let paste = action("filePaste.title", #selector(pasteSelectionInPreviousApp), enabled: onlineCount > 0)
+        StashShortcut.paste.chord(in: preferences).apply(to: paste)
+
+        menu.addItem(.separator())
+        action("ctx.copyTo", #selector(transferSelectedFiles(_:)), enabled: allOnline)
+        action("ctx.moveTo", #selector(transferSelectedFiles(_:)), enabled: allOnline, tag: 1)
+
+        menu.addItem(.separator())
+        let stash = action("stash.add", #selector(stashSelection), enabled: onlineCount > 0)
+        StashShortcut.add.chord(in: preferences).apply(to: stash)
+        if let scripts = fileScriptsMenu() {
+            let item = menu.addItem(withTitle: L10n.text("fileScripts.run"), action: nil, keyEquivalent: "")
+            item.submenu = scripts
+            item.isEnabled = allOnline
         }
-        let copyFiles = menu.addItem(withTitle: L10n.text("ctx.copyFiles"), action: #selector(copySelectedFiles), keyEquivalent: "")
-        copyFiles.target = self
-        copyFiles.isEnabled = !selectedOnlineItems.isEmpty && selectedOnlineItems.count == results.selectedItems.count
-        let duplicate = menu.addItem(withTitle: L10n.text("ctx.duplicate"), action: #selector(duplicateSelectedFiles), keyEquivalent: "")
-        duplicate.target = self
-        duplicate.isEnabled = copyFiles.isEnabled
-        let items = menu.items.filter { !$0.isSeparatorItem }
-        menu.removeAllItems()
-        func group(_ key: String, where predicate: (NSMenuItem) -> Bool) {
-            let matching = items.filter(predicate)
-            guard !matching.isEmpty else { return }
-            if !menu.items.isEmpty { menu.addItem(.separator()) }
-            menu.addItem(.sectionHeader(title: L10n.text(key)))
-            matching.forEach(menu.addItem)
-        }
-        group("panel.actionsOpen") {
-            $0.action == #selector(chooseApplication) || $0.action == #selector(contextAction(_:)) && $0.tag <= 2
-        }
-        group("panel.actionsOrganize") {
-            $0.action == #selector(scopeToSelection) || $0.action == #selector(stashSelection) ||
-            $0.action == #selector(excludeSelected) || $0.action == #selector(duplicateSelectedFiles) || $0.action == #selector(contextAction(_:)) && $0.tag == 7
-        }
-        group("panel.actionsCopy") {
-            $0.action == #selector(pasteSelectionInPreviousApp) || $0.action == #selector(copySelectedFiles) || $0.action == #selector(contextAction(_:)) && (4...5).contains($0.tag)
-        }
-        group("fileScripts.title") { $0.hasSubmenu }
+        menu.addItem(.separator())
+        action("ctx.trash", #selector(contextAction(_:)), enabled: onlineCount > 0, tag: 7)
+        action("ctx.exclude", #selector(excludeSelected))
         return menu
     }
+    @objc private func openSelectedInTerminal() {
+        guard let item = results.selectedItem, allowOnlineAction(),
+              let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else { return }
+        let directory = item.flags & SiftFlag.dir != 0 ? item.path : item.parentPath
+        NSWorkspace.shared.open([URL(fileURLWithPath: directory)], withApplicationAt: terminal, configuration: .init()) { [weak self] _, error in
+            DispatchQueue.main.async {
+                if error == nil { self?.hidePanel?() }
+                else { NSSound.beep() }
+            }
+        }
+    }
+
+    @objc private func copySelectionText(_ sender: NSMenuItem) {
+        let values = results.selectedItems.map { sender.tag < 3 ? $0.path : $0.name }
+        FileClipboardFormat(rawValue: sender.tag % 3)?.copy(values)
+    }
+
+    @objc private func transferSelectedFiles(_ sender: NSMenuItem) {
+        let paths = selectedOnlineItems.map(\.path)
+        guard !snapshot, !paths.isEmpty, paths.count == results.selectedItems.count else { return }
+        let move = sender.tag == 1
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.view.window?.isVisible == true else { return }
+            self.rememberFocus()
+            self.menuTracking = true
+            defer { self.menuTracking = false; self.restoreFocus() }
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            panel.prompt = L10n.text(move ? "ctx.moveButton" : "ctx.copyButton")
+            guard panel.runModal() == .OK, let folder = panel.url else { return }
+            self.footer.warning = false
+            self.footer.text = L10n.text(move ? "ctx.moving" : "ctx.copying")
+            self.fileTransferQueue.async { [weak self] in
+                let completed = ResultFileTransfer.run(paths: paths, to: folder, move: move)
+                DispatchQueue.main.async { [weak self] in
+                    self?.footer.warning = completed != paths.count
+                    self?.footer.text = L10n.text(move ? "ctx.movedCount" : "ctx.copiedCount", String(completed), String(paths.count))
+                }
+            }
+        }
+    }
+
     @objc private func copySelectedFiles() {
         let urls = selectedOnlineItems.map { URL(fileURLWithPath: $0.path) }
         guard !urls.isEmpty, urls.count == results.selectedItems.count else { return }
@@ -1375,7 +1406,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     @objc private func contextAction(_ item: NSMenuItem) {
-        switch item.tag { case 0: openSelected(); case 1: revealSelected(); case 2: previewSelected(); case 4: copyPath(); case 5: copyName(); case 7: trashSelected(); default: break }
+        switch item.tag { case 0: openSelected(); case 1: revealSelected(); case 2: previewSelected(); case 7: trashSelected(); default: break }
     }
     func menuWillOpen(_ menu: NSMenu) { menuTracking = true }
     func menuDidClose(_ menu: NSMenu) { menuTracking = false; hideIfInactive() }
