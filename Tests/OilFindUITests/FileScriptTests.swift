@@ -24,6 +24,10 @@ final class FileScriptTests: XCTestCase {
         XCTAssertFalse(rules.matches([first, second, second]))
         XCTAssertFalse(rules.matches([first, (URL(fileURLWithPath: "/tmp/folder.pdf"), true)]))
         XCTAssertFalse(rules.matches([first, (URL(fileURLWithPath: "/tmp/other.png"), false)]))
+        var folders = FileScript.Eligibility()
+        folders.foldersOnly = true
+        XCTAssertTrue(folders.matches([(URL(fileURLWithPath: "/tmp/folder"), true)]))
+        XCTAssertFalse(folders.matches([first]))
     }
 
     func testPassesPathsLiterallyAndReportsExitCodeAndStderr() throws {

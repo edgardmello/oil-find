@@ -64,6 +64,10 @@ final class FooterBar: FlippedView {
         bounds.fill()
     }
 
+    var showActionsMenu = true { didSet { needsLayout = true } }
+    var showActionDividers = false { didSet { needsLayout = true } }
+    private let actionDivider = SeparatorView()
+
     var showActionHints = true { didSet { needsLayout = true } }
     var desiredHeight: CGFloat { showsApplicationRow ? 62 : 34 }
 
@@ -151,6 +155,7 @@ final class FooterBar: FlippedView {
         inlinePreview.target = self
         inlinePreview.action = #selector(toggleInlinePreview)
         addSubview(inlinePreview)
+        addSubview(actionDivider)
         addSubview(actions); addSubview(stash)
         appChooser.bezelStyle = .recessed
         appChooser.font = .systemFont(ofSize: 11, weight: .medium)
@@ -264,13 +269,16 @@ final class FooterBar: FlippedView {
         inlinePreview.frame = NSRect(x: settings.frame.minX - 29, y: 4, width: 26, height: 26)
         var right = (inlinePreview.isHidden ? settings.frame.minX : inlinePreview.frame.minX) - 6
         for (button, item) in [(actions, StatusItem.actions), (stash, .stash)] {
-            button.isHidden = classicLayout || hiddenStatusItems.contains(item)
+            button.isHidden = classicLayout || hiddenStatusItems.contains(item) || (item == .actions && !showActionsMenu)
             if button.isHidden { continue }
             let width = ceil(Theme.textWidth(button.title, font: button.font!)) + 14
             button.frame = NSRect(x: right - width, y: 4, width: width, height: 26)
             right = button.frame.minX
         }
         actions.isEnabled = actionable
+        actionDivider.isHidden = true
+        let dividerX = right
+        if showActionDividers && !pinnedButtons.isEmpty { right -= 8 }
         for (_, button) in pinnedButtons.reversed() {
             let width = ceil(Theme.textWidth(button.title, font: button.font!)) + 16
             button.isHidden = !actionable || !fileActions || right - width < 120
@@ -278,6 +286,10 @@ final class FooterBar: FlippedView {
                 right -= width
                 button.frame = NSRect(x: right, y: 4, width: width, height: 26)
             }
+        }
+        if showActionDividers && pinnedButtons.contains(where: { !$0.1.isHidden }) {
+            actionDivider.frame = NSRect(x: dividerX - 4, y: 10, width: Theme.pixel(self), height: 14)
+            actionDivider.isHidden = false
         }
         var candidates: [KeyHint] = []
         if pinnedButtons.isEmpty && showActionHints && actionable && !warning {

@@ -88,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         if let limited = indexRequest { startIndex(limited: limited) }
+        if !state.isShowing && defaults.bool(forKey: "showSearchAtLaunch") { panel.show(source: .reopen) }
         showPendingSearchLink()
         // Acknowledge launches for older installers and the packaged launch smoke test.
         SystemUpdateFiles().cleanupAfterLaunch(application: Bundle.main.bundleURL, current: UpdateManager.current)

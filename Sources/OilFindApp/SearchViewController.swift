@@ -34,6 +34,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private let preferences: UserDefaults
     private(set) var searchInterface: SearchInterface = .window
     let panelBody = FlippedView()
+    private var searchHintTimer: Timer?
+    private var searchHintIndex = 0
+    private var lastHiddenAt: Date?
     private var barExpandedManually = false
     private(set) var barCollapsed = false
     private static let appearanceKeys = [SearchInterface.key, SearchMaterial.key, "searchTextSize",
@@ -78,7 +81,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private func refreshAdditionalFilter() {
         guard isViewLoaded else { return }
         filters.additionalTitle = additionalSearchProvider?.isEnabled == true ? additionalSearchProvider?.title : nil
-        searchField.placeholder = filters.additionalSelected ? additionalSearchProvider?.placeholder : nil
+        updateSearchHint()
     }
     private func additionalChanged() {
         refreshAdditionalFilter()
@@ -90,7 +93,34 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
         if view.window?.isVisible == true { refreshSearch() }
     }
+    private func updateSearchHint() {
+        if filters.additionalSelected {
+            searchField.placeholder = additionalSearchProvider?.placeholder
+        } else if preferences.bool(forKey: "showSearchHints") {
+            let examples = L10n.chinese ? SyntaxReference.zh : SyntaxReference.en
+            searchField.placeholder = L10n.text("settings.search.example", examples[searchHintIndex % examples.count][0])
+        } else {
+            searchField.placeholder = nil
+        }
+    }
+
+    private func startSearchHints() {
+        searchHintTimer?.invalidate()
+        searchHintTimer = nil
+        updateSearchHint()
+        guard !snapshot, preferences.bool(forKey: "showSearchHints"), view.window?.isVisible == true else { return }
+        searchHintTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] timer in
+            guard let self else { timer.invalidate(); return }
+            guard self.searchField.text.isEmpty, !self.filters.additionalSelected else { return }
+            self.searchHintIndex += 1
+            self.updateSearchHint()
+        }
+    }
+
     func panelDidHide() {
+        lastHiddenAt = Date()
+        searchHintTimer?.invalidate()
+        searchHintTimer = nil
         setInlinePreviewVisible(false, resize: false)
         requestApplicationSuggestions(for: nil)
         additionalSearchProvider?.visibilityChanged(false)
@@ -695,11 +725,17 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         case "fuzzyNames":
             fuzzyNames = preferences.bool(forKey: key)
             scopeChanged()
+        case "showActionsMenu":
+            footer.showActionsMenu = preferences.object(forKey: key) as? Bool ?? true
+        case "showActionDividers":
+            footer.showActionDividers = preferences.bool(forKey: key)
         case "showActionHints":
             footer.showActionHints = preferences.object(forKey: key) as? Bool ?? true
         case PinnedFileAction.preferenceKey:
             refreshPinnedActions()
-        case "showRecentByDefault":
+        case "showSearchHints":
+            startSearchHints()
+        case "minimumSearchLength", "showRecentByDefault":
             startSearch(preserveSelection: true)
         case "showOpenWithRow":
             refreshApplicationSuggestions()
@@ -714,6 +750,19 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     func preparePanelAppearance() {
         if !snapshot {
+            let delay = preferences.integer(forKey: "resetSearchAfter")
+            if delay > 0, let lastHiddenAt, Date().timeIntervalSince(lastHiddenAt) >= Double(delay) {
+                searchField.text = ""
+                folderScope = nil
+                volumeScope = nil
+                savedCriteria = nil
+                hiddenOnly = false
+                fuzzyNames = preferences.bool(forKey: "fuzzyNames")
+                selectionAnchor = nil
+                results.clear(preservingViewport: false)
+                filters.select(0, notify: false)
+            }
+            lastHiddenAt = nil
             barExpandedManually = false
             syncBarPresentation(resize: false)
             setInlinePreviewVisible(preferences.bool(forKey: "defaultSidePreview"), resize: false)
@@ -721,7 +770,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     func panelWillShow() {
-        if !snapshot { applySearchSetting("showActionHints") }
+        startSearchHints()
+        if !snapshot {
+            for key in ["showActionHints", "showActionsMenu", "showActionDividers"] {
+                applySearchSetting(key)
+            }
+        }
         refreshApplicationSuggestions()
         filters.scopeActive = folderScope != nil || volumeScope != nil || savedCriteria != nil
         filters.searchOptionsActive = hiddenOnly || fuzzyNames
@@ -791,6 +845,20 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         var options = filters.options
         if !snapshot { options.pinyin = UserDefaults.standard.bool(forKey: "pinyinEnabled") }
         let query = editingQuery(store: store)
+        let minimum = max(1, min(5, preferences.integer(forKey: "minimumSearchLength")))
+        let count = searchField.text.trimmingCharacters(in: .whitespacesAndNewlines).count
+        if !snapshot && count > 0 && count < minimum {
+            pendingNewSearch = nil
+            additionalPending = false
+            diagnostics = []
+            results.clear(preservingViewport: false)
+            empty.configure(diagnostic: nil, hasNoAccess: false, minimumSearchLength: minimum)
+            setState(.empty)
+            footer.warning = false
+            footer.text = ""
+            refreshProgress()
+            return
+        }
         if !snapshot && !additionalOnly && volumeScope == nil && options.kind == nil && query.isEmpty
             && preferences.object(forKey: "showRecentByDefault") as? Bool == false && !barExpandedManually {
             pendingNewSearch = nil
@@ -1126,7 +1194,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             }
         }
         let chord = StashShortcut.Chord(keyCode: UInt32(event.keyCode), modifiers: HotKey.carbonModifiers(flags))
-        let action: StashShortcut?
+        var action: StashShortcut?
         if event.keyCode == 76, chord.modifiers == StashShortcut.open.defaultChord.modifiers,
            StashShortcut.open.chord(in: preferences) == StashShortcut.open.defaultChord {
             action = .open
@@ -1135,6 +1203,11 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             action = .reveal
         } else {
             action = panelShortcuts[chord]
+        }
+        if action == nil && preferences.bool(forKey: "controlNavigation")
+            && flags.intersection([.command, .control, .option, .shift]) == .control {
+            if key == "n" { action = .down }
+            if key == "p" { action = .up }
         }
 
         if !snapshot && action == nil && flags.intersection([.command, .control, .option]) == .command {
@@ -1365,12 +1438,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             let urls = results.selectedItems.map { URL(fileURLWithPath: $0.path) }
             guard stateView == nil, !urls.isEmpty else { return }
             NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects(urls.map { $0 as NSURL })
-            NSPasteboard.general.setString(urls.map(\.path).joined(separator: "\n"), forType: .string)
+            NSPasteboard.general.setString(urls.map { clipboardPath($0.path) }.joined(separator: "\n"), forType: .string)
             footer.showToast(.copiedPath, value: L10n.text("selection.items", Presentation.countText(urls.count))); return
         }
         guard stateView == nil, let url = selectedURL else { return }
-        NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects([url as NSURL]); NSPasteboard.general.setString(url.path, forType: .string)
-        footer.showToast(.copiedPath, value: url.path)
+        NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects([url as NSURL]); NSPasteboard.general.setString(clipboardPath(url.path), forType: .string)
+        footer.showToast(.copiedPath, value: clipboardPath(url.path))
     }
     private func copyName() {
         if let item = results.selectedAdditional { performAdditional(item, kind: .copyName); return }
@@ -1464,6 +1537,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if !multipleSelected {
             menu.addItem(.separator())
             action("ctx.openWith", #selector(chooseApplication), enabled: allOnline)
+            action("settings.openWith.editor", #selector(openSelectedInEditor), enabled: allOnline)
             StashShortcut.terminal.chord(in: preferences).apply(to: action("ctx.terminal", #selector(openSelectedInTerminal), enabled: allOnline))
             action("scope.inFolder", #selector(scopeToSelection))
         }
@@ -1497,7 +1571,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
     @objc private func openSelectedInTerminal() {
         guard let item = results.selectedItem, allowOnlineAction(),
-              let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else { return }
+              let terminal = preferredApplication("terminalApplication", fallback: "com.apple.Terminal") else { return }
         let directory = item.flags & SiftFlag.dir != 0 ? item.path : item.parentPath
         NSWorkspace.shared.open([URL(fileURLWithPath: directory)], withApplicationAt: terminal, configuration: .init()) { [weak self] _, error in
             DispatchQueue.main.async {
@@ -1507,8 +1581,26 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
     }
 
+    private func preferredApplication(_ key: String, fallback: String) -> URL? {
+        if let path = preferences.string(forKey: key), FileManager.default.fileExists(atPath: path) {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        return NSWorkspace.shared.urlForApplication(withBundleIdentifier: fallback)
+    }
+
+    @objc private func openSelectedInEditor() {
+        guard let file = selectedURL,
+              let editor = preferredApplication("editorApplication", fallback: "com.apple.TextEdit") else { return }
+        openWithApplication(editor, file: file)
+    }
+
+    private func clipboardPath(_ path: String) -> String {
+        preferences.bool(forKey: "abbreviateCopiedPaths")
+            ? Presentation.abbreviate(path: path, home: NSHomeDirectory()) : path
+    }
+
     @objc private func copySelectionText(_ sender: NSMenuItem) {
-        let values = results.selectedItems.map { sender.tag < 3 ? $0.path : $0.name }
+        let values = results.selectedItems.map { sender.tag < 3 ? (sender.tag == FileClipboardFormat.shell.rawValue ? $0.path : clipboardPath($0.path)) : $0.name }
         FileClipboardFormat(rawValue: sender.tag % 3)?.copy(values)
     }
 
