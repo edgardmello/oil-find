@@ -33,6 +33,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private let snapshot: Bool
     private let preferences: UserDefaults
     private var searchInterface: SearchInterface = .window
+    let panelBody = FlippedView()
     private var barExpandedManually = false
     private(set) var barCollapsed = false
     private static let appearanceKeys = [SearchInterface.key, SearchMaterial.key, "searchTextSize",
@@ -155,7 +156,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     override func loadView() { view = PanelSurface(snapshot: snapshot) }
     override func viewDidLoad() {
         super.viewDidLoad()
-        [searchField, topLine, filters, results, empty, indexing, bottomLine, footer, inlinePreview, accessories, syntaxScroll].forEach(view.addSubview)
+        [topLine, filters, results, empty, indexing, bottomLine, footer, inlinePreview, accessories, syntaxScroll].forEach(panelBody.addSubview)
+        view.addSubview(panelBody)
+        view.addSubview(searchField)
         syntaxScroll.drawsBackground = false
         syntaxScroll.hasVerticalScroller = true
         syntaxScroll.autohidesScrollers = true
@@ -276,9 +279,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         searchField.showExpand = barCollapsed
         if barCollapsed {
             searchField.frame = NSRect(x: 0, y: 0, width: w, height: h)
-            [topLine, filters, results, empty, indexing, bottomLine, footer, inlinePreview, accessories, syntaxScroll].forEach { $0.frame = .zero }
             return
         }
+        panelBody.frame = view.bounds
         searchField.frame = NSRect(x: 0, y: 0, width: w, height: 64)
         topLine.frame = NSRect(x: 0, y: 64, width: w, height: px)
         filters.frame = NSRect(x: 0, y: 64 + px, width: w, height: FilterBar.toolbarHeight)
@@ -642,6 +645,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             && volumeScope == nil && !hiddenOnly && filters.options.kind == nil && !filters.additionalSelected
         guard collapsed != barCollapsed else { return }
         barCollapsed = collapsed
+        panelBody.isHidden = collapsed
         view.needsLayout = true
         if resize { (view.window as? SearchPanel)?.resizeForInlinePreview() }
     }
@@ -987,6 +991,14 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
         return L10n.text(partial ? "footer.partial" : "footer.results", count, duration)
     }
+    #if DEBUG
+    func prepareCollapsedBarSnapshot() {
+        view.layoutSubtreeIfNeeded()
+        searchInterface = .bar
+        syncBarPresentation(resize: false)
+    }
+    #endif
+
     func prepareSnapshot(state: String, query: String, options: SearchOptions, store: IndexStore?, selection: Int, additionalSources: [SearchSource] = [], additionalOnly: Bool = false) throws {
         _ = view
         searchField.text = state == "recent" ? "" : query; filters.options = options

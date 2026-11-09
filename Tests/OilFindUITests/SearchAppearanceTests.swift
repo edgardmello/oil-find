@@ -14,17 +14,23 @@ final class SearchAppearanceTests: XCTestCase {
 
         controller.preparePanelAppearance()
         XCTAssertTrue(controller.barCollapsed)
+        XCTAssertTrue(controller.panelBody.isHidden)
+        XCTAssertFalse(controller.searchField.isHidden)
         let down = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
                                                   timestamp: 0, windowNumber: 0, context: nil, characters: "",
                                                   charactersIgnoringModifiers: "", isARepeat: false, keyCode: 125))
         XCTAssertTrue(controller.handleKey(down))
         XCTAssertFalse(controller.barCollapsed)
+        XCTAssertFalse(controller.panelBody.isHidden)
         controller.preparePanelAppearance()
         XCTAssertTrue(controller.barCollapsed)
+        XCTAssertTrue(controller.panelBody.isHidden)
+        XCTAssertFalse(controller.searchField.isHidden)
 
         controller.searchField.text = "report"
         controller.startSearch()
         XCTAssertFalse(controller.barCollapsed)
+        XCTAssertFalse(controller.panelBody.isHidden)
     }
 
     func testStatusVisibilityIsIndependentForWindowAndSearchBar() throws {
@@ -35,7 +41,8 @@ final class SearchAppearanceTests: XCTestCase {
         preferences.set(["stash"], forKey: StatusItem.key(for: .window))
         preferences.set(["actions", "duration"], forKey: StatusItem.key(for: .bar))
         let controller = SearchViewController(snapshot: false, preferences: preferences)
-        let footer = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? FooterBar }.first)
+        _ = controller.view
+        let footer = try XCTUnwrap(controller.panelBody.subviews.compactMap { $0 as? FooterBar }.first)
         XCTAssertEqual(footer.hiddenStatusItems, [.stash])
 
         preferences.set(SearchInterface.bar.rawValue, forKey: SearchInterface.key)

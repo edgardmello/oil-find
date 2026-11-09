@@ -47,7 +47,8 @@ final class ResultsSelectionTests: XCTestCase {
         let controller = SearchViewController(snapshot: false, preferences: preferences)
         controller.additionalSources = { [SearchSource(id: "startup", displayName: "", isOnline: true, store: store)] }
         try controller.prepareSnapshot(state: "results", query: "report", options: .init(), store: store, selection: 0)
-        let footer = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? FooterBar }.first)
+        _ = controller.view
+        let footer = try XCTUnwrap(controller.panelBody.subviews.compactMap { $0 as? FooterBar }.first)
         let menu = try XCTUnwrap(controller.filters.viewMenu?())
         let compact = try XCTUnwrap(menu.items.first { $0.title == L10n.text("view.compact") })
 
