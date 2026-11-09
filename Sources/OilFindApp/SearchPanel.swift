@@ -111,6 +111,7 @@ final class SearchPanel: NSPanel {
         let cold = !isVisible
         if cold || hiding || !isKeyWindow { searchController.captureFilePasteDestination() }
         if cold || hiding {
+            searchController.preparePanelAppearance()
             resizeForInlinePreview(usePointerScreen: cold, display: false)
         }
         AppLog.logger.info("panel show source=\(source.rawValue, privacy: .public)")

@@ -218,6 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.panel.searchController.refreshShortcuts()
             }
             model.onPinyinChange = { [weak self] in self?.panel.searchController.startSearch(preserveSelection: true) }
+            model.onSearchSettingsChange = { [weak self] key in self?.panel.searchController.applySearchSetting(key) }
             settingsController = SettingsWindowController(model: model, appExtension: appExtension, externalDrives: externalDrives)
         }
         settingsController?.present()

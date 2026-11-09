@@ -37,6 +37,7 @@ final class FooterBar: FlippedView {
     var onChooseApplication: (() -> Void)?
     var onOpenApplication: ((URL) -> Void)?
     private var showsApplicationRow = false
+    var showActionHints = true { didSet { needsLayout = true } }
     var desiredHeight: CGFloat { showsApplicationRow ? 62 : 34 }
 
     private let toast = Theme.label(11.5, .regular, .labelColor)
@@ -212,7 +213,7 @@ final class FooterBar: FlippedView {
             right = button.frame.minX
         }
         actions.isEnabled = actionable
-        let candidates = actionable && !warning ? Array(hints.prefix(fileActions ? 2 : 1)) + [syntax] : [syntax]
+        let candidates = showActionHints && actionable && !warning ? Array(hints.prefix(fileActions ? 2 : 1)) + [syntax] : [syntax]
         let hintWidth = candidates.reduce(0) { $0 + $1.desiredWidth + 8 }
         let visibleHints = right - hintWidth >= 175 ? candidates : []
         for hint in hints + [syntax] { hint.isHidden = !visibleHints.contains(hint) }
