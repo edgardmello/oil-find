@@ -106,3 +106,31 @@ struct QuickFilter: Codable, Equatable {
         if let data = try? JSONEncoder().encode(filters) { preferences.set(data, forKey: storageKey) }
     }
 }
+
+extension QuickFilter {
+    /// Library filters first, then the quick filters saved from the search panel.
+    static func available(in preferences: UserDefaults) -> [QuickFilter] {
+        library(in: preferences) + load(from: preferences)
+    }
+
+    static func linked(_ id: String, in preferences: UserDefaults) -> QuickFilter? {
+        available(in: preferences).first { $0.linkID == id }
+    }
+
+    var linkID: String { presetID ?? name }
+
+    /// Library filters add their fields to whatever is typed; saved quick filters replace the typed query.
+    var refinesQuery: Bool { group != nil || prepend != nil || append != nil || match != nil || expiresAfter != nil }
+
+    func appendingFields(to query: Query, store: IndexStore?) -> Query {
+        var query = query
+        let restriction = match == .files ? "file:" : (match == .folders ? "folder:" : nil)
+        for field in [prepend, group != nil ? self.query : nil, append, restriction].compactMap({ $0 }) where !field.isEmpty {
+            let extra = Query.parse(field, store: store)
+            query.clauses.append(contentsOf: extra.clauses)
+            query.raw += "\n" + extra.raw
+            query.diagnostics.append(contentsOf: extra.diagnostics)
+        }
+        return query
+    }
+}

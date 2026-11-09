@@ -42,6 +42,21 @@ final class SearchEditingTests: XCTestCase {
         XCTAssertEqual(link.volume, "Backup")
         XCTAssertNil(SearchLink(try XCTUnwrap(URL(string: "oilfind://search?q=one&q=two"))))
         XCTAssertNil(SearchLink(try XCTUnwrap(URL(string: "oilfind://search?q=one&folder=relative"))))
+        XCTAssertNil(link.filterID)
+    }
+
+    func testSearchLinkAppliesLibraryFilterAndKeepsQuery() throws {
+        let suite = "OilFindSearchLink-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let link = try XCTUnwrap(SearchLink(try XCTUnwrap(URL(string: "oilfind://search?q=holiday&library=images"))))
+        XCTAssertEqual(link.filterID, "images")
+        XCTAssertNil(SearchLink(try XCTUnwrap(URL(string: "oilfind://search?q=a&library=images&library=pdf"))))
+
+        let controller = SearchViewController(snapshot: true, preferences: preferences)
+        controller.applySearchLink(link)
+        XCTAssertEqual(controller.searchField.text, "holiday")
+        XCTAssertEqual(controller.filters.options.kind, Query.kindValue("image"))
     }
 
     func testInlinePreviewShortcutTogglesAndResetsOnHide() {

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "oil-find",
+  "title": "Oil Find",
+  "description": "Search files with Oil Find from Raycast, using its index, filters and search syntax.",
+  "icon": "oil-find.png",
+  "author": "edgardmello",
+  "license": "MIT",
+  "platforms": [
+    "macOS"
+  ],
+  "categories": [
+    "Productivity"
+  ],
+  "commands": [
+    {
+      "name": "search-files",
+      "title": "Search Files with Oil Find",
+      "subtitle": "Oil Find",
+      "description": "Search files and folders in the Oil Find index. Supports Oil Find syntax such as *.pdf, in:~/Documents, dm:week and size:>10mb, plus the filters from your Oil Find library.",
+      "mode": "view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "applicationPath",
+      "type": "textfield",
+      "title": "Oil Find App Path",
+      "description": "Absolute path to Oil Find.app or a development build. Leave blank to use the app in Applications.",
+      "required": false
+    },
+    {
+      "name": "showDetail",
+      "type": "checkbox",
+      "title": "Details",
+      "label": "Show the preview panel by default",
+      "description": "Toggle it any time with ⌘I.",
+      "default": false,
+      "required": false
+    },
+    {
+      "name": "terminalApp",
+      "type": "appPicker",
+      "title": "Terminal",
+      "description": "Used by Open Folder in Terminal. Defaults to Terminal.",
+      "required": false
+    },
+    {
+      "name": "editorApp",
+      "type": "appPicker",
+      "title": "Editor",
+      "description": "Adds an Open in Editor action when set.",
+      "required": false
+    }
+  ],
+  "scripts": {
+    "dev": "ray develop",
+    "build": "ray build -e dist",
+    "lint": "ray lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@raycast/api": "^1.104.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.9.0"
+  }
+}

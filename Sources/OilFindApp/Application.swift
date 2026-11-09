@@ -3,6 +3,7 @@ import OilFindCore
 
 public enum Application {
     public static func run(appExtension: ApplicationExtension? = nil, arguments: [String] = Array(CommandLine.arguments.dropFirst())) {
+    if arguments == ["--raycast-search"] { RaycastSearch.run(); return }
     if let status = appExtension?.handleLaunch(arguments: arguments) { exit(status) }
     let externalDrives = ExternalDriveCatalog()
 #if DEBUG
