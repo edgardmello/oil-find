@@ -369,7 +369,11 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             searchSources.first { $0.id == value || $0.displayName == value }?.id ?? value
         }
         filters.select(link.kind, notify: false)
-        scopeChanged()
+        if let id = link.filterID, let filter = QuickFilter.linked(id, in: preferences) {
+            applyFilter(filter, restoreQuery: false)
+        } else {
+            scopeChanged()
+        }
     }
 
     private func makeScopeMenu() -> NSMenu {
@@ -529,8 +533,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     private func applyFilter(_ filter: QuickFilter, restoreQuery: Bool) {
-        activeLibraryFilter = filter.group != nil || filter.prepend != nil || filter.append != nil || filter.match != nil
-            || filter.expiresAfter != nil ? filter : nil
+        activeLibraryFilter = filter.refinesQuery ? filter : nil
         if restoreQuery { searchField.text = filter.query }
         savedCriteria = filter.criteria
         folderScope = filter.folder
@@ -1038,16 +1041,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             var info = stat(); return path.withCString { stat($0, &info) == 0 }
         })
         if !filters.additionalSelected {
-            if let filter = activeLibraryFilter {
-                let restriction = filter.match == .files ? "file:" : (filter.match == .folders ? "folder:" : nil)
-                let fields = [filter.prepend, filter.group != nil ? filter.query : nil, filter.append, restriction]
-                for field in fields.compactMap({ $0 }).filter({ !$0.isEmpty }) {
-                    let extra = Query.parse(field, store: store)
-                    query.clauses.append(contentsOf: extra.clauses)
-                    query.raw += "\n" + extra.raw
-                    if !extra.diagnostics.isEmpty { query.diagnostics.append(contentsOf: extra.diagnostics) }
-                }
-            }
+            if let filter = activeLibraryFilter { query = filter.appendingFields(to: query, store: store) }
             if let folderScope { query = query.restricted(toFolder: folderScope) }
             if let savedCriteria { query = query.applying(savedCriteria) }
             if hiddenOnly { query = query.showingOnlyHiddenFiles() }

@@ -6,13 +6,15 @@ struct SearchLink {
     let kind: Int
     let folder: String?
     let volume: String?
+    /// A filter from the Oil Find filter library, matched by preset ID or name.
+    let filterID: String?
 
     init?(_ url: URL) {
         guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
               parts.scheme?.lowercased() == "oilfind", parts.host?.lowercased() == "search",
               parts.path.isEmpty || parts.path == "/", parts.user == nil, parts.password == nil, parts.port == nil else { return nil }
         let items = parts.queryItems ?? []
-        let parameters = ["q", "filter", "folder", "volume"]
+        let parameters = ["q", "filter", "folder", "volume", "library"]
         guard parameters.allSatisfy({ key in items.filter { $0.name == key }.count <= 1 }) else { return nil }
         func value(_ key: String) -> String? { items.first { $0.name == key }?.value }
         guard let query = value("q"), !query.contains("\0") else { return nil }
@@ -27,5 +29,6 @@ struct SearchLink {
             folder = normalized
         } else { folder = nil }
         volume = value("volume")
+        filterID = value("library").flatMap { $0.isEmpty ? nil : $0 }
     }
 }
