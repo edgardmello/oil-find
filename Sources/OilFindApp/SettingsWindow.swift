@@ -1,3 +1,4 @@
+import UniformTypeIdentifiers
 import AppKit
 import SwiftUI
 import ServiceManagement
@@ -326,7 +327,7 @@ private struct LanguagePicker: NSViewRepresentable {
 }
 
 enum SettingsPage: String, Identifiable {
-    case general, style, actionBar, search, filters, index, drives, exclusions, shortcuts, scripts, topics, extensions
+    case general, style, actionBar, search, filters, index, drives, exclusions, shortcuts, openWith, scripts, topics, extensions
 
     var id: Self { self }
     var title: String { L10n.text(presentation.title) }
@@ -343,6 +344,7 @@ enum SettingsPage: String, Identifiable {
         case .drives: return ("drivesTitle", "externaldrive")
         case .exclusions: return ("settings.page.exclusions", "minus.circle")
         case .shortcuts: return ("settings.page.shortcuts", "keyboard")
+        case .openWith: return ("footer.openWith", "arrow.up.right.app")
         case .scripts: return ("fileScripts.title", "terminal")
         case .topics: return ("topicsTitle", "text.bubble")
         case .extensions: return ("settings.page.extensions", "puzzlepiece.extension")
@@ -373,6 +375,35 @@ private struct SettingsForm: View {
             model.preferences.set(value, forKey: key)
             model.onSearchSettingsChange?(key)
         })
+    }
+
+    private func applicationRow(_ title: String, key: String, fallback: String) -> some View {
+        let application = stylePreference(key, fallback: "")
+        let url = application.wrappedValue.isEmpty
+            ? NSWorkspace.shared.urlForApplication(withBundleIdentifier: fallback)
+            : URL(fileURLWithPath: application.wrappedValue)
+        return HStack {
+            Text(L10n.text(title))
+            Spacer()
+            if !application.wrappedValue.isEmpty {
+                Button(L10n.text("settings.openWith.reset")) { application.wrappedValue = "" }
+            }
+            Button {
+                guard let window = window() else { return }
+                let panel = NSOpenPanel()
+                panel.allowedContentTypes = [.applicationBundle]
+                panel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+                panel.beginSheetModal(for: window) { response in
+                    if response == .OK, let selected = panel.url { application.wrappedValue = selected.path }
+                }
+            } label: {
+                if let url {
+                    Label(url.deletingPathExtension().lastPathComponent, systemImage: "app")
+                } else {
+                    Text(L10n.text("settings.openWith.choose"))
+                }
+            }
+        }
     }
 
     private func interfaceCard(_ mode: SearchInterface, selection: Binding<String>) -> some View {
@@ -595,7 +626,7 @@ private struct SettingsForm: View {
                 VStack(alignment: .leading, spacing: 18) {
                     sidebarGroup("settings.group.app", pages: [.general, .style, .actionBar])
                     sidebarGroup("settings.group.indexing", pages: [.search, .filters, .index, .drives, .exclusions])
-                    sidebarGroup("settings.group.actions", pages: [.shortcuts, .scripts])
+                    sidebarGroup("settings.group.actions", pages: [.shortcuts, .openWith, .scripts])
                     sidebarGroup("settings.group.integrations", pages: appExtension == nil ? [.topics] : [.topics, .extensions])
                 }
                 .padding(.horizontal, 12)
@@ -650,6 +681,13 @@ private struct SettingsForm: View {
                     Text(L10n.text("settings.general.primaryDisplay")).tag(false)
                 }
                 option("settings.general.keepOpen", help: "settings.general.keepOpenHelp", value: preference("keepPanelOpenOnDefocus"))
+                Toggle(L10n.text("settings.general.showAtLaunch"), isOn: preference("showSearchAtLaunch"))
+                Picker(L10n.text("settings.general.resetSearch"), selection: stylePreference("resetSearchAfter", fallback: 0)) {
+                    Text(L10n.text("settings.general.never")).tag(0)
+                    ForEach([1, 5, 15, 30], id: \.self) { minutes in
+                        Text(L10n.text("settings.general.minutes", String(minutes))).tag(minutes * 60)
+                    }
+                }
             }
             Section {
                 HStack {
@@ -736,6 +774,10 @@ private struct SettingsForm: View {
             } footer: {
                 hint(L10n.text("settings.actionBar.pinnedHelp"))
             }
+            Section(L10n.text("settings.actionBar.styling")) {
+                option("settings.actionBar.menu", help: "settings.actionBar.menuHelp", value: preference("showActionsMenu", default: true))
+                Toggle(L10n.text("settings.actionBar.dividers"), isOn: preference("showActionDividers"))
+            }
             Section(L10n.text("settings.actionBar.preview")) {
                 HStack(spacing: 12) {
                     let pinned = preference("compactResults").wrappedValue
@@ -746,7 +788,10 @@ private struct SettingsForm: View {
                         Label(L10n.text("hint.open"), systemImage: "return")
                         Label(L10n.text("hint.preview"), systemImage: "eye")
                     }
-                    Label(L10n.text("panel.actions"), systemImage: "ellipsis.circle")
+                    if preference("showActionsMenu", default: true).wrappedValue {
+                        if !pinned.isEmpty && preference("showActionDividers").wrappedValue { Divider().frame(height: 14) }
+                        Label(L10n.text("panel.actions"), systemImage: "ellipsis.circle")
+                    }
                     Spacer()
                 }.foregroundStyle(.secondary)
                 if preference("compactResults").wrappedValue && preference("showOpenWithRow", default: true).wrappedValue {
@@ -771,6 +816,16 @@ private struct SettingsForm: View {
                 }
                 option("settings.pinyin", help: "settings.pinyinHint",
                        value: Binding(get: { model.pinyinEnabled }, set: model.setPinyin))
+                Picker(L10n.text("settings.search.minimum"), selection: stylePreference("minimumSearchLength", fallback: 1)) {
+                    ForEach(1...5, id: \.self) { count in Text(String(count)).tag(count) }
+                }
+            }
+            Section(L10n.text("settings.search.results")) {
+                Toggle(L10n.text("settings.search.showHints"), isOn: preference("showSearchHints"))
+                Picker(L10n.text("settings.interface.defaultResults"), selection: preference("showRecentByDefault", default: true)) {
+                    Text(L10n.text("settings.interface.recent")).tag(true)
+                    Text(L10n.text("settings.interface.empty")).tag(false)
+                }
             }
             Section(L10n.text("hint.preview")) {
                 option("settings.previewSpace", help: "settings.previewSpaceHint",
@@ -779,6 +834,9 @@ private struct SettingsForm: View {
         case .filters:
             EmptyView()
         case .shortcuts:
+            Section(L10n.text("settings.shortcuts.navigation")) {
+                Toggle(L10n.text("settings.shortcuts.controlNavigation"), isOn: preference("controlNavigation"))
+            }
             let matches = shortcutRows.filter { row in
                 matchesShortcut(row.title, chord: model.stashShortcuts[row.action] ?? row.action.defaultChord)
             }
@@ -866,6 +924,14 @@ private struct SettingsForm: View {
             Section {
                 AITopicSettings(manager: model.topics)
             }
+        case .openWith:
+            Section(L10n.text("settings.openWith.defaultApps")) {
+                applicationRow("settings.openWith.editorApp", key: "editorApplication", fallback: "com.apple.TextEdit")
+                applicationRow("settings.openWith.terminalApp", key: "terminalApplication", fallback: "com.apple.Terminal")
+            }
+            Section(L10n.text("settings.openWith.paths")) {
+                option("settings.openWith.tilde", help: "settings.openWith.tildeHelp", value: preference("abbreviateCopiedPaths"))
+            }
         case .scripts:
             Section {
                 if model.fileScripts.isEmpty { hint(L10n.text("settings.scripts.empty")) }
@@ -912,6 +978,7 @@ private struct SettingsForm: View {
                 Section(L10n.text("settings.scripts.eligibility")) {
                     TextField(L10n.text("settings.filters.extensions"),
                               text: scriptRule(script.id, \.extensions), prompt: Text("pdf, png"))
+                        .disabled(model.scriptEligibility(script.id).foldersOnly == true)
                     let minimum = scriptRule(script.id, \.minimum)
                     let maximum = scriptRule(script.id, \.maximum)
                     Stepper(L10n.text("settings.scripts.minimum", String(minimum.wrappedValue)),
@@ -924,7 +991,23 @@ private struct SettingsForm: View {
                         Stepper(L10n.text("settings.scripts.maximum", String(maximum.wrappedValue)),
                                 value: maximum, in: minimum.wrappedValue...999)
                     }
-                    Toggle(L10n.text("settings.scripts.filesOnly"), isOn: scriptRule(script.id, \.filesOnly))
+                    Picker(L10n.text("settings.scripts.selectionType"), selection: Binding(
+                        get: {
+                            let rule = model.scriptEligibility(script.id)
+                            return rule.foldersOnly == true ? 2 : (rule.filesOnly ? 1 : 0)
+                        },
+                        set: { value in
+                            var rule = model.scriptEligibility(script.id)
+                            rule.filesOnly = value == 1
+                            rule.foldersOnly = value == 2 ? true : nil
+                            if value == 2 { rule.extensions = "" }
+                            model.updateScriptEligibility(script.id, rule)
+                        }
+                    )) {
+                        Text(L10n.text("settings.scripts.filesAndFolders")).tag(0)
+                        Text(L10n.text("settings.scripts.filesOnly")).tag(1)
+                        Text(L10n.text("settings.scripts.foldersOnly")).tag(2)
+                    }
                 }
             }
         case .extensions:

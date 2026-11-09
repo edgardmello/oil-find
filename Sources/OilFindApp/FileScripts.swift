@@ -8,6 +8,7 @@ struct FileScript: Codable, Identifiable, Equatable {
         var minimum = 1
         var maximum = 0
         var filesOnly = false
+        var foldersOnly: Bool?
 
         func matches(_ selection: [(url: URL, isDirectory: Bool)]) -> Bool {
             guard selection.count >= max(1, minimum), maximum == 0 || selection.count <= maximum else { return false }
@@ -16,7 +17,7 @@ struct FileScript: Codable, Identifiable, Equatable {
             }.filter { !$0.isEmpty })
             return selection.allSatisfy { file in
                 if file.isDirectory { return !filesOnly && allowed.isEmpty }
-                return allowed.isEmpty || allowed.contains(file.url.pathExtension.lowercased())
+                return foldersOnly != true && (allowed.isEmpty || allowed.contains(file.url.pathExtension.lowercased()))
             }
         }
     }

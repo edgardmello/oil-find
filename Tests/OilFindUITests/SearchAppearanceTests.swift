@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+import OilFindCore
 @testable import OilFindApp
 
 final class SearchAppearanceTests: XCTestCase {
@@ -74,6 +75,28 @@ final class SearchAppearanceTests: XCTestCase {
         controller.applySearchSetting(SearchInterface.key)
         XCTAssertTrue(controller.results.compact)
         XCTAssertEqual(controller.filters.preferredHeight, FilterBar.toolbarHeight)
+    }
+
+    func testMinimumQueryLengthClearsPreviousResultsWhileTyping() throws {
+        _ = NSApplication.shared
+        let suite = "OilFindMinQuery-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data().write(to: root.appendingPathComponent("report.txt"))
+        let config = IndexConfig(rootPath: root.path)
+        let store = IndexStore(scan: try XCTUnwrap(Scanner(config: config, threads: 1).run()), config: config)
+        let controller = SearchViewController(snapshot: false, preferences: preferences)
+        try controller.prepareSnapshot(state: "results", query: "report", options: .init(), store: store, selection: 0)
+        XCTAssertNotNil(controller.results.selectedItem)
+
+        preferences.set(3, forKey: "minimumSearchLength")
+        controller.searchField.text = "re"
+        controller.startSearch()
+        XCTAssertNil(controller.results.result)
+        XCTAssertNil(controller.results.selectedItem)
     }
 
     func testStatusVisibilityIsIndependentForWindowAndSearchBar() throws {
