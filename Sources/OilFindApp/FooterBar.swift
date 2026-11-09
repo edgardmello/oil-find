@@ -72,6 +72,9 @@ final class FooterBar: FlippedView {
     private var toastContent: (ToastKind, String)?
     private let status = Theme.label(11.5, .regular, .tertiaryLabelColor)
     private let hints = [KeyHint("↩", L10n.text("hint.open")), KeyHint("⌘Y", L10n.text("hint.preview"))]
+    private let classicReveal = KeyHint("⌘↩", L10n.text("hint.reveal"))
+    private let classicCopy = KeyHint("⌘C", L10n.text("hint.copy"))
+    var classicLayout = false { didSet { needsLayout = true } }
     private let settings = SettingsButton()
     private let actions = ChromeButton("", style: .plain, size: 12, weight: .medium)
     private let stash = ChromeButton("", style: .plain, size: 12, weight: .medium)
@@ -110,7 +113,12 @@ final class FooterBar: FlippedView {
     }
     var onSettings: (() -> Void)?
     private let syntax = KeyHint("⌘/", L10n.text("hint.syntax"))
-    var fileActions = true { didSet { needsLayout = true } }
+    var fileActions = true {
+        didSet {
+            classicCopy.localize(L10n.text(fileActions ? "hint.copy" : "hint.copyResult"))
+            needsLayout = true
+        }
+    }
     var spacePreview = false { didSet { updatePreviewKey() } }
     private var actionsKey = "⌘K"
     private var stashKey = "⇧⌘S"
@@ -123,6 +131,8 @@ final class FooterBar: FlippedView {
         configuredPreviewKey = StashShortcut.preview.symbols(in: preferences)
         hints[0].key = StashShortcut.open.symbols(in: preferences)
         syntax.key = StashShortcut.syntax.symbols(in: preferences)
+        classicReveal.key = StashShortcut.reveal.symbols(in: preferences)
+        classicCopy.key = StashShortcut.copyPath.symbols(in: preferences)
         updatePreviewKey()
         refreshButtons()
     }
@@ -134,7 +144,7 @@ final class FooterBar: FlippedView {
         super.init(frame: frame)
         status.wantsLayer = true; toast.wantsLayer = true; toast.alphaValue = 0
         toast.lineBreakMode = .byTruncatingMiddle
-        addSubview(status); addSubview(toast); hints.forEach(addSubview); addSubview(syntax); addSubview(settings)
+        addSubview(status); addSubview(toast); (hints + [classicReveal, classicCopy]).forEach(addSubview); addSubview(syntax); addSubview(settings)
         inlinePreview.isBordered = false
         inlinePreview.setButtonType(.pushOnPushOff)
         inlinePreview.imagePosition = .imageOnly
@@ -234,6 +244,8 @@ final class FooterBar: FlippedView {
         updateInlinePreviewButton()
         updatePreviewKey()
         for (hint, key) in zip(hints, ["open", "preview"]) { hint.localize(L10n.text("hint." + key)) }
+        classicReveal.localize(L10n.text("hint.reveal"))
+        classicCopy.localize(L10n.text(fileActions ? "hint.copy" : "hint.copyResult"))
         syntax.localize(L10n.text("hint.syntax")); settings.localize()
         if let (kind, value) = toastContent { toast.stringValue = Presentation.toastText(kind, value: value, chinese: L10n.chinese) }
         needsLayout = true
@@ -248,11 +260,11 @@ final class FooterBar: FlippedView {
                                      width: max(0, bounds.width - appChooser.frame.maxX - 24), height: 24)
         }
         settings.frame = NSRect(x: bounds.width - 18 - settings.desiredWidth, y: 4, width: settings.desiredWidth, height: 26)
-        inlinePreview.isHidden = hiddenStatusItems.contains(.sidePreview)
+        inlinePreview.isHidden = classicLayout || hiddenStatusItems.contains(.sidePreview)
         inlinePreview.frame = NSRect(x: settings.frame.minX - 29, y: 4, width: 26, height: 26)
         var right = (inlinePreview.isHidden ? settings.frame.minX : inlinePreview.frame.minX) - 6
         for (button, item) in [(actions, StatusItem.actions), (stash, .stash)] {
-            button.isHidden = hiddenStatusItems.contains(item)
+            button.isHidden = classicLayout || hiddenStatusItems.contains(item)
             if button.isHidden { continue }
             let width = ceil(Theme.textWidth(button.title, font: button.font!)) + 14
             button.frame = NSRect(x: right - width, y: 4, width: width, height: 26)
@@ -270,12 +282,14 @@ final class FooterBar: FlippedView {
         var candidates: [KeyHint] = []
         if pinnedButtons.isEmpty && showActionHints && actionable && !warning {
             if !hiddenStatusItems.contains(.open) { candidates.append(hints[0]) }
+            if classicLayout && fileActions { candidates.append(classicReveal) }
             if fileActions && !hiddenStatusItems.contains(.preview) { candidates.append(hints[1]) }
+            if classicLayout { candidates.append(classicCopy) }
         }
         if !hiddenStatusItems.contains(.syntax) { candidates.append(syntax) }
         let hintWidth = candidates.reduce(0) { $0 + $1.desiredWidth + 8 }
         let visibleHints = right - hintWidth >= 175 ? candidates : []
-        for hint in hints + [syntax] { hint.isHidden = !visibleHints.contains(hint) }
+        for hint in hints + [syntax, classicReveal, classicCopy] { hint.isHidden = !visibleHints.contains(hint) }
         var x = right - visibleHints.reduce(0) { $0 + $1.desiredWidth + 10 }
         status.frame = NSRect(x: 22, y: 9, width: max(0, x - 38), height: 16)
         toast.frame = status.frame

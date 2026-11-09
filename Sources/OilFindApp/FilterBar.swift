@@ -3,7 +3,7 @@ import OilFindCore
 
 final class FilterBar: FlippedView, NSMenuDelegate {
     static let toolbarHeight: CGFloat = 66
-    var preferredHeight: CGFloat { compactToolbar ? 36 : Self.toolbarHeight }
+    var preferredHeight: CGFloat { classicToolbar ? 40 : (compactToolbar ? 36 : Self.toolbarHeight) }
     var compactToolbar = false {
         didSet {
             guard compactToolbar != oldValue else { return }
@@ -12,6 +12,13 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         }
     }
     static let names = ["all", "folder", "app", "document", "image", "video", "audio", "code", "archive"]
+    var classicToolbar = false {
+        didSet {
+            guard classicToolbar != oldValue else { return }
+            updateCategoryVisibility()
+            needsLayout = true
+        }
+    }
     private var buttons: [ChromeButton] = []
     private var buttonWidths: [CGFloat] = []
     private let capsule = TintPlate(radius: 13) { view in
@@ -120,6 +127,7 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         }
         capsule.isHidden = compactToolbar
         categoryButton.isHidden = !compactToolbar
+        [scopeButton, searchOptionsButton, savedButton, viewButton].forEach { $0.isHidden = classicToolbar }
     }
 
     private func showCategories() {
@@ -150,6 +158,14 @@ final class FilterBar: FlippedView, NSMenuDelegate {
     }
     override func layout() {
         super.layout()
+        if classicToolbar {
+            let width = Theme.textWidth(sortButton.title, font: sortButton.font!) + 24
+            sortButton.frame = NSRect(x: bounds.width - 18 - width, y: 7, width: width, height: 26)
+            layoutCategoryChips(y: 7, rightInset: width + 12)
+            laidOut = true
+            moveCapsule(animated: false)
+            return
+        }
         if !compactToolbar { layoutCategoryChips() }
         let controls = compactToolbar ? [categoryButton] + toolbarButtons : toolbarButtons
         let leftCount = controls.count - 2
@@ -173,15 +189,15 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         if !compactToolbar { moveCapsule(animated: false) }
     }
 
-    private func layoutCategoryChips() {
+    private func layoutCategoryChips(y: CGFloat = 36, rightInset: CGFloat = 0) {
         var x: CGFloat = 18
         let visibleCount = Self.names.count + (additionalTitle == nil ? 0 : 1)
-        let available = max(0, bounds.width - 36 - CGFloat(visibleCount - 1) * 2)
+        let available = max(0, bounds.width - 36 - rightInset - CGFloat(visibleCount - 1) * 2)
         let natural = buttonWidths.prefix(visibleCount).reduce(0, +)
         let reduction = max(0, (natural - available) / CGFloat(visibleCount))
         for (i, button) in buttons.prefix(visibleCount).enumerated() {
             let width = max(20, buttonWidths[i] - reduction)
-            button.frame = NSRect(x: x, y: 36, width: width, height: 26)
+            button.frame = NSRect(x: x, y: y, width: width, height: 26)
             x += width + 2
         }
 
@@ -209,6 +225,14 @@ final class FilterBar: FlippedView, NSMenuDelegate {
             let item = NSMenuItem(title: L10n.text("sort." + Self.sortName(key)), action: #selector(sortSelected(_:)), keyEquivalent: "")
             item.tag = i; item.target = self; item.state = options.sort == key ? .on : .off
             menu.addItem(item)
+        }
+        if classicToolbar {
+            menu.addItem(.separator())
+            for (button, makeMenu) in [(scopeButton, scopeMenu), (searchOptionsButton, searchOptionsMenu),
+                                       (savedButton, savedMenu), (viewButton, viewMenu)] {
+                guard let submenu = makeMenu?() else { continue }
+                menu.addItem(withTitle: button.title, action: nil, keyEquivalent: "").submenu = submenu
+            }
         }
         show(menu, under: sortButton)
     }
