@@ -32,7 +32,6 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private let snapshot: Bool
     private let preferences: UserDefaults
     private let filePaste = FilePasteHandoff()
-    private let droplrShare = DroplrUpload()
     private lazy var fileStash = FileStash(preferences: preferences)
     private lazy var scriptWindow = FileScriptWindow()
     private let accessories = SearchAccessoryBar(frame: .zero)
@@ -180,8 +179,6 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                 self.footerShowsSelection = multiple
             }
         }
-        accessories.configureDroplrShare(available: { [weak self] in self?.droplrShare.isAvailable == true },
-                                         share: { [weak self] in self?.prepareDroplrShare($0) })
         results.onContextMenu = { [weak self] _ in self?.contextMenu() }
         results.onRefreshApplied = { [weak self] result in self?.resultDidChange(result) }
         results.onDragging = { [weak self] active in
@@ -1193,11 +1190,6 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let copyFiles = menu.addItem(withTitle: L10n.text("ctx.copyFiles"), action: #selector(copySelectedFiles), keyEquivalent: "")
         copyFiles.target = self
         copyFiles.isEnabled = !selectedOnlineItems.isEmpty && selectedOnlineItems.count == results.selectedItems.count
-        if droplrShare.isAvailable, results.selectedItem != nil {
-            let share = menu.addItem(withTitle: L10n.text("droplr.upload"), action: #selector(prepareSelectedDroplrShare), keyEquivalent: "")
-            share.target = self
-            share.isEnabled = copyFiles.isEnabled && results.selectedItems.count == 1
-        }
         let duplicate = menu.addItem(withTitle: L10n.text("ctx.duplicate"), action: #selector(duplicateSelectedFiles), keyEquivalent: "")
         duplicate.target = self
         duplicate.isEnabled = copyFiles.isEnabled
@@ -1220,34 +1212,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         group("panel.actionsCopy") {
             $0.action == #selector(pasteSelectionInPreviousApp) || $0.action == #selector(copySelectedFiles) || $0.action == #selector(contextAction(_:)) && (4...5).contains($0.tag)
         }
-        group("droplr.title") { $0.action == #selector(prepareSelectedDroplrShare) }
         group("fileScripts.title") { $0.hasSubmenu }
         return menu
     }
-    @objc private func prepareSelectedDroplrShare() {
-        let urls = selectedOnlineItems.map { URL(fileURLWithPath: $0.path) }
-        guard urls.count == results.selectedItems.count else { return }
-        prepareDroplrShare(urls)
-    }
-
-    private func prepareDroplrShare(_ urls: [URL]) {
-        guard urls.count == 1, let file = urls.first else { return }
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.droplrShare.upload(file, dismiss: { self.hidePanel?() }) { failure in
-                NSApp.activate()
-                let alert = NSAlert()
-                alert.messageText = L10n.text("droplr.upload")
-                alert.informativeText = L10n.text("droplr." + failure.rawValue)
-                alert.addButton(withTitle: L10n.text("droplr.reveal"))
-                alert.addButton(withTitle: L10n.text("droplr.close"))
-                if alert.runModal() == .alertFirstButtonReturn {
-                    NSWorkspace.shared.activateFileViewerSelecting([file])
-                }
-            }
-        }
-    }
-
     @objc private func copySelectedFiles() {
         let urls = selectedOnlineItems.map { URL(fileURLWithPath: $0.path) }
         guard !urls.isEmpty, urls.count == results.selectedItems.count else { return }
