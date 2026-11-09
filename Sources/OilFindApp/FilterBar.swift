@@ -2,6 +2,7 @@ import AppKit
 import OilFindCore
 
 final class FilterBar: FlippedView, NSMenuDelegate {
+    static let toolbarHeight: CGFloat = 66
     static let names = ["all", "folder", "app", "document", "image", "video", "audio", "code", "archive"]
     private var buttons: [ChromeButton] = []
     private var buttonWidths: [CGFloat] = []
@@ -23,13 +24,21 @@ final class FilterBar: FlippedView, NSMenuDelegate {
     private let scopeButton = ChromeButton("", style: .plain, size: 12, weight: .medium)
     var scopeActive = false { didSet { refreshScope() } }
     var scopeMenu: (() -> NSMenu)?
+    var searchOptionsMenu: (() -> NSMenu)?
+    var savedMenu: (() -> NSMenu)?
+    var viewMenu: (() -> NSMenu)?
+    var searchOptionsActive = false { didSet { refreshScope() } }
+    private let searchOptionsButton = ChromeButton("", style: .plain, size: 12, weight: .medium)
+    private let savedButton = ChromeButton("", style: .plain, size: 12, weight: .medium)
+    private let viewButton = ChromeButton("", style: .plain, size: 12, weight: .medium)
+    private var toolbarButtons: [ChromeButton] { [scopeButton, searchOptionsButton, savedButton, viewButton, sortButton] }
     private let sortButton = ChromeButton("", style: .plain, size: 12, weight: .medium)
     var onChange: (() -> Void)?
     var onMenuTracking: ((Bool) -> Void)?
     var onSortChange: (() -> Void)?
     var options = SearchOptions() { didSet { refresh() } }
     var isEnabled = true {
-        didSet { alphaValue = isEnabled ? 1 : 0.4; (buttons + [sortButton, scopeButton]).forEach { $0.isEnabled = isEnabled } }
+        didSet { alphaValue = isEnabled ? 1 : 0.4; (buttons + toolbarButtons).forEach { $0.isEnabled = isEnabled } }
     }
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -44,13 +53,15 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         buttons.append(additional); buttonWidths.append(0); addSubview(additional)
         sortButton.trailingSymbol = Theme.symbol("arrow.up.arrow.down", size: 10, weight: .medium)
         sortButton.onPress = { [weak self] in self?.showSortMenu() }
-        scopeButton.trailingSymbol = Theme.symbol("chevron.down", size: 10, weight: .medium)
-        scopeButton.onPress = { [weak self] in
-            guard let self, let menu = self.scopeMenu?() else { return }
-            menu.delegate = self
-            menu.popUp(positioning: nil, at: NSPoint(x: self.scopeButton.frame.minX, y: self.scopeButton.frame.maxY), in: self)
+        for (button, menu) in [(scopeButton, \FilterBar.scopeMenu), (searchOptionsButton, \FilterBar.searchOptionsMenu),
+                               (savedButton, \FilterBar.savedMenu), (viewButton, \FilterBar.viewMenu)] {
+            button.trailingSymbol = Theme.symbol("chevron.down", size: 10, weight: .medium)
+            button.onPress = { [weak self, weak button] in
+                guard let self, let button, let menu = self[keyPath: menu]?() else { return }
+                self.show(menu, under: button)
+            }
+            addSubview(button)
         }
-        addSubview(scopeButton)
         addSubview(sortButton); refresh(); refreshScope()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -59,6 +70,11 @@ final class FilterBar: FlippedView, NSMenuDelegate {
     }
     private func refreshScope() {
         scopeButton.title = L10n.text("scope.menu")
+        searchOptionsButton.title = L10n.text("scope.options")
+        savedButton.title = L10n.text("scope.saved")
+        viewButton.title = L10n.text("scope.view")
+        searchOptionsButton.textTint = searchOptionsActive ? .controlAccentColor : nil
+        searchOptionsButton.needsDisplay = true
         scopeButton.textTint = scopeActive ? .controlAccentColor : nil
         scopeButton.needsDisplay = true
         needsLayout = true
@@ -83,18 +99,30 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         super.layout()
         var x: CGFloat = 18
         let visibleCount = Self.names.count + (additionalTitle == nil ? 0 : 1)
-        let sortWidth = Theme.textWidth(sortButton.title, font: sortButton.font!) + 16
-        let scopeWidth = Theme.textWidth(scopeButton.title, font: scopeButton.font!) + 24
-        let available = max(0, bounds.width - 36 - sortWidth - scopeWidth - 18 - CGFloat(visibleCount - 1) * 2)
+        let available = max(0, bounds.width - 36 - CGFloat(visibleCount - 1) * 2)
         let natural = buttonWidths.prefix(visibleCount).reduce(0, +)
         let reduction = max(0, (natural - available) / CGFloat(visibleCount))
         for (i, button) in buttons.prefix(visibleCount).enumerated() {
             let width = max(20, buttonWidths[i] - reduction)
-            button.frame = NSRect(x: x, y: 7, width: width, height: 26); x += width + 2
+            button.frame = NSRect(x: x, y: 36, width: width, height: 26)
+            x += width + 2
         }
-        let width = Theme.textWidth(sortButton.title, font: sortButton.font!) + 16
-        sortButton.frame = NSRect(x: bounds.width - 18 - width, y: 7, width: width, height: 26)
-        scopeButton.frame = NSRect(x: sortButton.frame.minX - 6 - scopeWidth, y: 7, width: scopeWidth, height: 26)
+
+        let widths = toolbarButtons.map { ceil(Theme.textWidth($0.title, font: $0.font!)) + 24 }
+        let fitting = min(1, max(0, bounds.width - 52) / widths.reduce(0, +))
+        var left: CGFloat = 18
+        for index in 0..<3 {
+            let width = floor(widths[index] * fitting)
+            toolbarButtons[index].frame = NSRect(x: left, y: 5, width: width, height: 26)
+            left += width + 4
+        }
+        var right = bounds.width - 18
+        for index in [4, 3] {
+            let width = floor(widths[index] * fitting)
+            right -= width
+            toolbarButtons[index].frame = NSRect(x: right, y: 5, width: width, height: 26)
+            right -= 4
+        }
         laidOut = true; moveCapsule(animated: false)
     }
     private func moveCapsule(animated: Bool) {
@@ -121,7 +149,12 @@ final class FilterBar: FlippedView, NSMenuDelegate {
             item.tag = i; item.target = self; item.state = options.sort == key ? .on : .off
             menu.addItem(item)
         }
-        menu.popUp(positioning: nil, at: NSPoint(x: sortButton.frame.minX, y: sortButton.frame.maxY), in: self)
+        show(menu, under: sortButton)
+    }
+
+    private func show(_ menu: NSMenu, under button: ChromeButton) {
+        menu.delegate = self
+        menu.popUp(positioning: nil, at: NSPoint(x: button.frame.minX, y: button.frame.maxY), in: self)
     }
     @objc private func sortSelected(_ item: NSMenuItem) {
         let key = [SortKey.relevance, .name, .modified, .size][item.tag]

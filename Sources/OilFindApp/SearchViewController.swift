@@ -167,6 +167,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         filters.onChange = { [weak self] in self?.scopeChanged(resetAdditional: false) }
         results.setCompact(preferences.bool(forKey: "compactResults"))
         filters.scopeMenu = { [weak self] in self?.makeScopeMenu() ?? NSMenu() }
+        filters.searchOptionsMenu = { [weak self] in self?.makeSearchOptionsMenu() ?? NSMenu() }
+        filters.savedMenu = { [weak self] in self?.makeQuickFilterMenu() ?? NSMenu() }
+        filters.viewMenu = { [weak self] in self?.makeResultsViewMenu() ?? NSMenu() }
         filters.onSortChange = { [weak self] in
             guard let self, !self.snapshot else { return }
             let recent = self.filters.options.sortsRecentResults
@@ -253,11 +256,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let w = view.bounds.width, h = view.bounds.height, px = Theme.pixel(view)
         searchField.frame = NSRect(x: 0, y: 0, width: w, height: 64)
         topLine.frame = NSRect(x: 0, y: 64, width: w, height: px)
-        filters.frame = NSRect(x: 0, y: 64 + px, width: w, height: 40)
+        filters.frame = NSRect(x: 0, y: 64 + px, width: w, height: FilterBar.toolbarHeight)
+        let belowFilters = filters.frame.maxY
         let accessoryHeight = syntaxVisible ? 0 : accessories.desiredHeight
         accessories.isHidden = syntaxVisible || accessoryHeight == 0
-        accessories.frame = NSRect(x: 0, y: 104 + px, width: w, height: accessoryHeight)
-        let top: CGFloat = 104 + px + accessoryHeight
+        accessories.frame = NSRect(x: 0, y: belowFilters, width: w, height: accessoryHeight)
+        let top = belowFilters + accessoryHeight
         let footerHeight = footer.desiredHeight
         let region = NSRect(x: 0, y: top, width: w, height: max(0, h - top - footerHeight - px))
         let previewWidth = inlinePreviewVisible && !syntaxVisible ? min(400, floor(region.width * 0.36)) : 0
@@ -327,25 +331,33 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             clear.toolTip = folderScope
             menu.addItem(clear)
         }
-        menu.addItem(.separator())
+        return menu
+    }
+
+    private func makeSearchOptionsMenu() -> NSMenu {
+        let menu = NSMenu()
         let hidden = menu.addItem(withTitle: L10n.text("scope.hiddenOnly"), action: #selector(toggleHiddenOnly), keyEquivalent: "")
         hidden.target = self
         hidden.state = hiddenOnly ? .on : .off
         let fuzzy = menu.addItem(withTitle: L10n.text("scope.fuzzyNames"), action: #selector(toggleFuzzyNames), keyEquivalent: "")
         fuzzy.target = self
         fuzzy.state = fuzzyNames ? .on : .off
-        let quick = menu.addItem(withTitle: L10n.text("quickFilter.title"), action: nil, keyEquivalent: "")
-        quick.submenu = makeQuickFilterMenu()
-        menu.addItem(.separator())
-        let viewStyle = menu.addItem(withTitle: L10n.text("view.results"), action: nil, keyEquivalent: "")
-        let styles = NSMenu()
+        return menu
+    }
+
+    private func makeResultsViewMenu() -> NSMenu {
+        let menu = NSMenu()
         for (tag, key) in ["view.original", "view.compact"].enumerated() {
-            let item = styles.addItem(withTitle: L10n.text(key), action: #selector(selectResultsView(_:)), keyEquivalent: "")
+            let item = menu.addItem(withTitle: L10n.text(key), action: #selector(selectResultsView(_:)), keyEquivalent: "")
             item.tag = tag
             item.target = self
             item.state = (tag == 1) == results.compact ? .on : .off
         }
-        viewStyle.submenu = styles
+        menu.addItem(.separator())
+        let preview = menu.addItem(withTitle: L10n.text("inlinePreview.show"),
+                                   action: #selector(toggleInlinePreview), keyEquivalent: "")
+        preview.target = self
+        preview.state = inlinePreviewVisible ? .on : .off
         return menu
     }
 
@@ -478,7 +490,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     private func scopeChanged(resetAdditional: Bool = true) {
-        filters.scopeActive = folderScope != nil || volumeScope != nil || hiddenOnly || fuzzyNames
+        filters.scopeActive = folderScope != nil || volumeScope != nil
+        filters.searchOptionsActive = hiddenOnly || fuzzyNames
         if resetAdditional && filters.additionalSelected { filters.select(0, notify: false) }
         refreshAdditionalFilter()
         refreshAccessories()
@@ -570,7 +583,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     func panelWillShow() {
         refreshApplicationSuggestions()
-        filters.scopeActive = folderScope != nil || volumeScope != nil || hiddenOnly || fuzzyNames
+        filters.scopeActive = folderScope != nil || volumeScope != nil
+        filters.searchOptionsActive = hiddenOnly || fuzzyNames
         refreshAccessories()
         additionalSearchProvider?.visibilityChanged(true)
         setBrowsing(false)
@@ -1079,7 +1093,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
         return snapshot || current?.store === item.source.store
     }
-    private func toggleInlinePreview() {
+    @objc private func toggleInlinePreview() {
         if syntaxVisible { toggleSyntax(false) }
         setInlinePreviewVisible(!inlinePreviewVisible)
         restoreFocus()

@@ -83,13 +83,12 @@ final class SearchAccessoryTests: XCTestCase {
         let controller = SearchViewController(snapshot: false, preferences: preferences)
         _ = controller.view
         func restore(_ title: String) throws {
-            let menu = try XCTUnwrap(controller.filters.scopeMenu?())
-            let quick = try XCTUnwrap(menu.items.first { $0.title == L10n.text("quickFilter.title") }?.submenu)
+            let quick = try XCTUnwrap(controller.filters.savedMenu?())
             let item = try XCTUnwrap(quick.items.first { $0.title == title })
             XCTAssertTrue(app.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
         }
         func fuzzyMenuState() throws -> NSControl.StateValue {
-            let menu = try XCTUnwrap(controller.filters.scopeMenu?())
+            let menu = try XCTUnwrap(controller.filters.searchOptionsMenu?())
             return try XCTUnwrap(menu.items.first { $0.title == L10n.text("scope.fuzzyNames") }).state
         }
 
@@ -116,8 +115,7 @@ final class SearchAccessoryTests: XCTestCase {
         let controller = SearchViewController(snapshot: true, preferences: preferences)
         let view = controller.view
         controller.searchField.text = "keep this text"
-        let menu = try XCTUnwrap(controller.filters.scopeMenu?())
-        let quick = try XCTUnwrap(menu.items.first { $0.title == L10n.text("quickFilter.title") }?.submenu)
+        let quick = try XCTUnwrap(controller.filters.savedMenu?())
         let apply = try XCTUnwrap(quick.items.first { $0.title == L10n.text("quickFilter.refine") }?.submenu?.items.first)
         XCTAssertTrue(app.sendAction(try XCTUnwrap(apply.action), to: apply.target, from: apply))
         XCTAssertEqual(controller.searchField.text, "keep this text")
