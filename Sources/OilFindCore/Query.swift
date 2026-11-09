@@ -116,7 +116,7 @@ public struct Query {
         }
         func tokenize(_ input: String) -> [(body: String, range: NSRange)] {
             var result: [(body: String, range: NSRange)] = []
-            var token = "", quoted = false, start: String.Index?
+            var token = "", quoted = false, bracketed = false, start: String.Index?
             func flush(_ end: String.Index) {
                 if let begin = start, !token.isEmpty { result.append((token, NSRange(begin..<end, in: input))) }
                 token = ""; start = nil
@@ -124,7 +124,11 @@ public struct Query {
             for i in input.indices {
                 let c = input[i]
                 if c == "\"" { if start == nil { start = i }; quoted.toggle(); continue }
-                if !quoted && (c.isWhitespace || c == "|") {
+                if !quoted {
+                    if c == "[", token.isEmpty { bracketed = true }
+                    else if c == "]", bracketed { bracketed = false }
+                }
+                if !quoted && !bracketed && (c.isWhitespace || c == "|") {
                     flush(i)
                     if c == "|" { result.append(("|", NSRange(i..<input.index(after: i), in: input))) }
                 } else { if start == nil { start = i }; token.append(c) }
@@ -135,11 +139,25 @@ public struct Query {
         let tokens = wholePath ? [(body: source, range: NSRange(location: 0, length: source.utf16.count))] : tokenize(source)
         let originalTokens = tokenize(text)
         var originalCursor = 0
+        var shorthandExtensions = Set<UInt64>()
+        func flushShorthandExtensions() {
+            guard !shorthandExtensions.isEmpty else { return }
+            clauses.append(Clause(alternatives: [Atom(negated: false, matcher: .ext(shorthandExtensions))]))
+            shorthandExtensions = []
+        }
         for i in tokens.indices {
             let t = tokens[i]
             if t.body == "|" { continue }
             var body = t.body, neg = false
             if body.first == "!" { neg = true; body.removeFirst() }
+            let quoted = Range(t.range, in: source).map { source[$0].contains("\"") } ?? false
+            let shorthand = wholePath || quoted ? nil : shorthandExtension(body)
+            let joinsAlternatives = (i > 0 && tokens[i - 1].body == "|") || (i + 1 < tokens.count && tokens[i + 1].body == "|")
+            if let shorthand, !neg, !joinsAlternatives {
+                shorthandExtensions.insert(shorthand)
+                continue
+            }
+            flushShorthandExtensions()
             if !body.isEmpty {
                 var originalRange = t.range
                 if let colon = body.firstIndex(of: ":") {
@@ -149,17 +167,28 @@ public struct Query {
                         return normalizePaste(original).lowercased().hasPrefix(key)
                     }) { originalRange = originalTokens[ordinal].range; originalCursor = ordinal + 1 }
                 }
+                if !wholePath, !neg, body.hasPrefix("["), body.hasSuffix("]"), body.count > 2 {
+                    let contents = body.dropFirst().dropLast()
+                    let terms = quoted ? [contents] : contents.split(separator: "|")
+                    alts.append(contentsOf: terms.map { Atom(negated: false, matcher: .content(String($0))) })
+                    if i + 1 == tokens.count || tokens[i + 1].body != "|" { flushClause() }
+                    continue
+                }
                 var diagnostic: QueryDiagnostic?
-                let matcher = wholePath ? Matcher.path(components: pathComponents(body.lowercased(), home: home)) : parseMatcher(body, now: now, home: home, diagnostic: &diagnostic)
+                let matcher: Matcher
+                if wholePath { matcher = .path(components: pathComponents(body.lowercased(), home: home)) }
+                else if neg && body == "/" && !quoted { matcher = .foldersOnly }
+                else if let shorthand { matcher = .ext([shorthand]) }
+                else { matcher = parseMatcher(body, quoted: quoted, now: now, home: home, diagnostic: &diagnostic) }
                 if var d = diagnostic {
                     d.range = originalRange
                     let editing = editingRange.map { $0.location >= originalRange.location && $0.location <= NSMaxRange(originalRange) } ?? false
                     if !isComposing && !editing { diagnostics.append(d) }
                 } else {
-                    let ordinary = !body.contains(":") && !body.contains("/") && !body.hasPrefix("~") && !body.contains("*") && !body.contains("?")
+                    let ordinary = !body.hasPrefix("'") && !body.contains(":") && !body.contains("/") && !body.hasPrefix("~") && !body.contains("*") && !body.contains("?")
                     var resolved = matcher
                     if fuzzyNames && ordinary && !neg, case .name(let needle, false) = matcher,
-                       let range = Range(t.range, in: source), !source[range].contains("\"") {
+                       !quoted {
                         resolved = .fuzzyName(needle)
                     }
                     alts.append(Atom(negated: neg, matcher: resolved, excludesAncestors: neg && ordinary))
@@ -168,6 +197,7 @@ public struct Query {
             if i + 1 == tokens.count || tokens[i + 1].body != "|" { flushClause() }
         }
         flushClause()
+        flushShorthandExtensions()
         // A query made only of invalid values must not fall back to the recent-files list.
         if clauses.isEmpty && tokens.contains(where: { $0.body != "|" }) {
             clauses = [Clause(alternatives: [Atom(negated: false, matcher: .name(needle: Array(source.lowercased().utf8), caseSensitive: false))])]
@@ -181,7 +211,7 @@ public struct Atom {
     public var excludesAncestors: Bool = false
 }
 public struct QueryDiagnostic: Equatable {
-    public enum Kind: String { case regex, kind, size, date }
+    public enum Kind: String { case regex, kind, size, date, depth }
     public var kind: Kind
     public var value: String = ""
     public var range: NSRange = NSRange(location: 0, length: 0)
@@ -195,6 +225,7 @@ public enum Matcher {
     case path(components: [[UInt8]])
     case subtree(String)
     case hidden
+    case depth(UInt16)
     case glob(pattern: [UInt8], onPath: Bool)
     case regex(NSRegularExpression, onPath: Bool)
     case ext(Set<UInt64>)
@@ -206,13 +237,23 @@ public enum Matcher {
     case size(ClosedRange<UInt64>)
     case modified(ClosedRange<UInt32>)
     case tag(String)
+    case content(String)
 }
 private func extKey(_ s: String) -> UInt64? {
     let b = Array(s.lowercased().utf8); guard (1...8).contains(b.count), b.allSatisfy({ $0 < 128 }) else { return nil }
     return b.reduce(0) { ($0 << 8) | UInt64($1) }
 }
-private func parseMatcher(_ body: String, now: Date, home: String, diagnostic: inout QueryDiagnostic?) -> Matcher {
+private func shorthandExtension(_ text: String) -> UInt64? {
+    guard text.hasPrefix(".") else { return nil }
+    let suffix = text.dropFirst()
+    guard suffix.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) }) else { return nil }
+    return extKey(String(suffix))
+}
+private func parseMatcher(_ body: String, quoted: Bool, now: Date, home: String, diagnostic: inout QueryDiagnostic?) -> Matcher {
     let lower = body.lowercased()
+    if body.hasPrefix("'"), body.count > 1 {
+        return .name(needle: Array(lower.dropFirst().utf8), caseSensitive: false)
+    }
     if let colon = body.firstIndex(of: ":") {
         let key = body[..<colon].lowercased(), value = String(body[body.index(after: colon)...])
         switch key {
@@ -225,10 +266,17 @@ private func parseMatcher(_ body: String, now: Date, home: String, diagnostic: i
         case "file": return value.isEmpty ? .filesOnly : .fileName(Array(value.lowercased().utf8))
         case "folder": return value.isEmpty ? .foldersOnly : .folderName(Array(value.lowercased().utf8))
         case "size": if let range = parseSize(value) { return .size(range) }; diagnostic = QueryDiagnostic(kind: .size)
-        case "dm": if let range = parseDate(value, now: now) { return .modified(range) }; diagnostic = QueryDiagnostic(kind: .date)
+        case "dm", "modified": if let range = parseDate(value, now: now) { return .modified(range) }; diagnostic = QueryDiagnostic(kind: .date)
+        case "in" where !value.isEmpty:
+            let path = value.hasSuffix("/") ? value : value + "/"
+            return .path(components: pathComponents(path.lowercased(), home: home))
+        case "depth":
+            if let depth = UInt16(value) { return .depth(depth) }
+            diagnostic = QueryDiagnostic(kind: .depth)
         case "path": return .path(components: pathComponents(value.lowercased(), home: home))
         case "fuzzy" where !value.isEmpty: return .fuzzyName(Array(value.lowercased().utf8))
         case "case": return .name(needle: Array(value.utf8), caseSensitive: true)
+        case "content" where !value.isEmpty: return .content(value)
         case "tag": return .tag(value.trimmingCharacters(in: .whitespaces))
         case "regex":
             do { return .regex(try NSRegularExpression(pattern: value), onPath: value.contains("/")) }
@@ -236,6 +284,19 @@ private func parseMatcher(_ body: String, now: Date, home: String, diagnostic: i
         default: return .name(needle: Array(lower.utf8), caseSensitive: false)
         }
         return .name(needle: Array(lower.utf8), caseSensitive: false)
+    }
+    if !quoted {
+        if body.hasPrefix("#"), body.count > 1 { return .tag(String(body.dropFirst())) }
+        let prefix = body.hasPrefix("^"), suffix = body.hasSuffix("$")
+        if body.count > (prefix && suffix ? 2 : 1), prefix || suffix {
+            let start = prefix ? body.index(after: body.startIndex) : body.startIndex
+            let end = suffix ? body.index(before: body.endIndex) : body.endIndex
+            let literal = NSRegularExpression.escapedPattern(for: String(body[start..<end]))
+            let pattern = (prefix ? "^" : "") + literal + (suffix ? "(?=\\.[^.]+$|$)" : "")
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+                return .regex(regex, onPath: false)
+            }
+        }
     }
     let folded = lower
     if folded.contains("*") || folded.contains("?") { return .glob(pattern: Array(folded.utf8), onPath: folded.contains("/")) }
@@ -287,9 +348,13 @@ private func parseDate(_ s: String, now: Date) -> ClosedRange<UInt32>? {
     switch t {
     case "today": start = today; end = cal.date(byAdding: .day, value: 1, to: today)
     case "yesterday": start = cal.date(byAdding: .day, value: -1, to: today); end = today
-    case "week": start = cal.dateInterval(of: .weekOfYear, for: now)?.start; end = cal.dateInterval(of: .weekOfYear, for: now)?.end
-    case "month": start = cal.dateInterval(of: .month, for: now)?.start; end = cal.dateInterval(of: .month, for: now)?.end
-    case "year": start = cal.dateInterval(of: .year, for: now)?.start; end = cal.dateInterval(of: .year, for: now)?.end
+    case "week", "thisweek": start = cal.dateInterval(of: .weekOfYear, for: now)?.start; end = cal.dateInterval(of: .weekOfYear, for: now)?.end
+    case "month", "thismonth": start = cal.dateInterval(of: .month, for: now)?.start; end = cal.dateInterval(of: .month, for: now)?.end
+    case "year", "thisyear": start = cal.dateInterval(of: .year, for: now)?.start; end = cal.dateInterval(of: .year, for: now)?.end
+    case "lastweek", "lastmonth", "lastyear":
+        let component: Calendar.Component = t == "lastweek" ? .weekOfYear : (t == "lastmonth" ? .month : .year)
+        let interval = cal.date(byAdding: component, value: -1, to: now).flatMap { cal.dateInterval(of: component, for: $0) }
+        start = interval?.start; end = interval?.end
     default:
         if let unit = t.last, ["h", "d", "w"].contains(unit), let n = Int(t.dropLast()), n >= 0 {
             let multiplier = unit == "h" ? 3_600 : unit == "d" ? 86_400 : 604_800

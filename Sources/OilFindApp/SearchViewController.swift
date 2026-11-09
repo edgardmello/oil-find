@@ -25,6 +25,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private let topLine = SeparatorView(), bottomLine = SeparatorView()
     private let empty = StateView(.empty), indexing = StateView(.indexing)
     let syntax = SyntaxReference(frame: .zero)
+    private let syntaxScroll = NSScrollView()
     private(set) var syntaxVisible = false
     private var diagnostics: [QueryDiagnostic] = []
     private var snapshotNoAccess = false
@@ -143,9 +144,15 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     override func loadView() { view = PanelSurface(snapshot: snapshot) }
     override func viewDidLoad() {
         super.viewDidLoad()
-        [searchField, topLine, filters, results, empty, indexing, bottomLine, footer, inlinePreview, accessories, syntax].forEach(view.addSubview)
-        syntax.isHidden = true
+        [searchField, topLine, filters, results, empty, indexing, bottomLine, footer, inlinePreview, accessories, syntaxScroll].forEach(view.addSubview)
+        syntaxScroll.drawsBackground = false
+        syntaxScroll.hasVerticalScroller = true
+        syntaxScroll.autohidesScrollers = true
+        syntaxScroll.documentView = syntax
+        syntaxScroll.isHidden = true
         inlinePreview.isHidden = true
+        syntax.shortcutPreferences = preferences
+        refreshShortcuts()
         syntax.onExample = { [weak self] example in
             guard let self else { return }; self.setBrowsing(false); self.searchField.text = example; self.toggleSyntax(false); self.searchField.focus(); self.startSearch()
         }
@@ -244,7 +251,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let previewWidth = inlinePreviewVisible && !syntaxVisible ? min(400, floor(region.width * 0.36)) : 0
         let list = NSRect(x: 0, y: top, width: w - previewWidth, height: region.height)
         [results, empty, indexing].forEach { $0.frame = list }
-        syntax.frame = region
+        syntaxScroll.frame = region
+        syntax.frame = NSRect(origin: .zero, size: NSSize(width: syntaxScroll.contentSize.width,
+                                                           height: max(region.height, syntax.contentHeight)))
         inlinePreview.frame = NSRect(x: list.maxX, y: top, width: previewWidth, height: region.height)
         bottomLine.frame = NSRect(x: 0, y: h - 34 - px, width: w, height: px)
         footer.frame = NSRect(x: 0, y: h - 34, width: w, height: 34)
@@ -340,8 +349,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let refine = NSMenu()
         if !saved.isEmpty { menu.addItem(.sectionHeader(title: L10n.text("quickFilter.restore"))) }
         for (index, filter) in saved.enumerated() {
-            let item = menu.addItem(withTitle: filter.name, action: #selector(applyQuickFilterItem(_:)), keyEquivalent: index < 9 ? String(index + 1) : "")
-            item.keyEquivalentModifierMask = [.control, .option]
+            let item = menu.addItem(withTitle: filter.name, action: #selector(applyQuickFilterItem(_:)), keyEquivalent: "")
+            if StashShortcut.quickFilters.indices.contains(index) { StashShortcut.quickFilters[index].chord(in: preferences).apply(to: item) }
             item.target = self; item.tag = index
             let refinement = refine.addItem(withTitle: filter.name, action: #selector(refineQuickFilterItem(_:)), keyEquivalent: "")
             refinement.target = self; refinement.tag = index
@@ -726,12 +735,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         refreshInlinePreview()
         view.needsLayout = true
         footer.actionable = !visible && stateView == nil && (results.result?.total ?? 0) > 0
-        syntax.isHidden = false
-        Theme.Motion.opacity(syntax, to: visible ? 1 : 0, using: snapshot ? nil : Theme.Motion.chip)
-        if let layer = syntax.layer { Theme.Motion.animate(layer, "transform.translation.y", to: visible ? 0 : 8, using: snapshot ? nil : Theme.Motion.chip) }
+        syntaxScroll.isHidden = false
+        Theme.Motion.opacity(syntaxScroll, to: visible ? 1 : 0, using: snapshot ? nil : Theme.Motion.chip)
+        if let layer = syntaxScroll.layer { Theme.Motion.animate(layer, "transform.translation.y", to: visible ? 0 : 8, using: snapshot ? nil : Theme.Motion.chip) }
         if !visible {
-            if snapshot { syntax.isHidden = true }
-            else { DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.chip.settlingDuration) { [weak self] in if self?.syntaxVisible == false { self?.syntax.isHidden = true } } }
+            if snapshot { syntaxScroll.isHidden = true }
+            else { DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.chip.settlingDuration) { [weak self] in if self?.syntaxVisible == false { self?.syntaxScroll.isHidden = true } } }
         }
     }
     private func resultDidChange(_ result: SearchPresentation) {
@@ -855,42 +864,24 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             item.source.isOnline && (snapshot || searchSources.first { $0.id == item.source.id }.map { $0.isOnline && $0.store === item.source.store } == true)
         }
     }
+    private lazy var panelShortcuts = makePanelShortcuts()
+
+    private func makePanelShortcuts() -> [StashShortcut.Chord: StashShortcut] {
+        Dictionary(StashShortcut.allCases.map { ($0.chord(in: preferences), $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    func refreshShortcuts() {
+        panelShortcuts = makePanelShortcuts()
+        footer.updateShortcuts(in: preferences)
+        syntax.localize()
+    }
+
     private var multipleSelected: Bool { results.selectionCount > 1 && results.selectedAdditional == nil }
     func handleKey(_ event: NSEvent) -> Bool {
         if (view.window as? SearchPanel)?.hiding == true { return true }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let command = flags.contains(.command), option = flags.contains(.option)
         if searchField.editor.hasMarkedText() { return false }
-        if let handled = accessories.handleStashKey(event) { return handled }
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-        if flags.intersection([.command, .control, .option, .shift]) == [.control, .option],
-           let slot = Int(key), (1...9).contains(slot), !event.isARepeat,
-           applyQuickFilter(at: slot - 1) { return true }
-        if let slot = FileScript.shortcutSlot(keyCode: UInt32(event.keyCode), modifiers: HotKey.carbonModifiers(flags)) {
-            let scripts = FileScript.load(from: preferences)
-            if scripts.indices.contains(slot) {
-                if !event.isARepeat { runFileScript(scripts[slot]) }
-                return true
-            }
-        }
-        if flags.contains(.command) || flags.contains(.control) {
-            if StashShortcut.add.chord(in: preferences).matches(event) {
-                if !event.isARepeat { stashSelection() }
-                return true
-            }
-            if StashShortcut.paste.chord(in: preferences).matches(event) {
-                if !event.isARepeat { pasteSelectionInPreviousApp() }
-                return true
-            }
-            if StashShortcut.show.chord(in: preferences).matches(event) {
-                if !event.isARepeat { toggleStash() }
-                return true
-            }
-        }
-        if flags.intersection([.command, .control, .option, .shift]) == .command, key == "k" {
-            if !event.isARepeat { showActions(anchoredTo: footer) }
-            return true
-        }
         // A nonactivating panel has no Edit menu to dispatch text shortcuts.
         if flags.intersection([.command, .control, .option, .shift]) == .command,
            let editor = searchField.input.currentEditor() {
@@ -902,56 +893,88 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             default: break
             }
         }
-        if flags.intersection([.command, .control, .option, .shift]) == [.command, .shift], key == "p" {
-            if !event.isARepeat { toggleInlinePreview() }
+        let chord = StashShortcut.Chord(keyCode: UInt32(event.keyCode), modifiers: HotKey.carbonModifiers(flags))
+        let action: StashShortcut?
+        if event.keyCode == 76, chord.modifiers == StashShortcut.open.defaultChord.modifiers,
+           StashShortcut.open.chord(in: preferences) == StashShortcut.open.defaultChord {
+            action = .open
+        } else if event.keyCode == 76, chord.modifiers == StashShortcut.reveal.defaultChord.modifiers,
+                  StashShortcut.reveal.chord(in: preferences) == StashShortcut.reveal.defaultChord {
+            action = .reveal
+        } else {
+            action = panelShortcuts[chord]
+        }
+
+        if let handled = accessories.handleStashKey(event, action: action) { return handled }
+        if action == .syntax {
+            if !event.isARepeat { toggleSyntax() }
             return true
         }
-        if command && event.keyCode == 44 { toggleSyntax(); return true }
-        if syntaxVisible && event.keyCode == 53 { toggleSyntax(false); return true }
+        if action == .escape {
+            if syntaxVisible { toggleSyntax(false) }
+            else if quickLook.isVisible { quickLook.close() }
+            else { hidePanel?() }
+            return true
+        }
         if syntaxVisible { return false }
-        if [126, 125, 116, 121, 115, 119].contains(event.keyCode) { setBrowsing(true) }
-        if event.keyCode == 49 && flags.intersection([.command, .control, .option, .shift]).isEmpty
-            && (quickLook.isVisible || spaceOpensQuickLook) {
-            // Space always dismisses an open preview; holding it must not flicker the panel.
+        if event.keyCode == 49 && chord.modifiers == 0 && (quickLook.isVisible || spaceOpensQuickLook) {
             if !event.isARepeat { previewSelected() }
             return true
         }
-        switch event.keyCode {
-        case 115: results.select(0, repeatKey: event.isARepeat); return true
-        case 119: results.select((results.result?.count ?? 1) - 1, repeatKey: event.isARepeat); return true
-        case 126 where flags.contains(.shift) && !command: results.extend(-1, repeatKey: event.isARepeat); return true
-        case 125 where flags.contains(.shift) && !command: results.extend(1, repeatKey: event.isARepeat); return true
-        case 126: if command { results.select(0, repeatKey: event.isARepeat) } else { results.move(-1, repeatKey: event.isARepeat) }; return true
-        case 125: if command { results.select((results.result?.count ?? 1) - 1, repeatKey: event.isARepeat) } else { results.move(1, repeatKey: event.isARepeat) }; return true
-        case 116: results.page(-1, repeatKey: event.isARepeat); return true
-        case 121: results.page(1, repeatKey: event.isARepeat); return true
-        case 36, 76:
-            if command { revealSelected() }
-            else if !browsingResults && !option && !filters.additionalSelected, let path = explicitPath {
-                if !event.isARepeat { openExplicitPath(path) }
+        guard let action else { return false }
+        switch action {
+        case .up, .down, .extendUp, .extendDown, .first, .last, .pageUp, .pageDown, .home, .end:
+            setBrowsing(true)
+            switch action {
+            case .up: results.move(-1, repeatKey: event.isARepeat)
+            case .down: results.move(1, repeatKey: event.isARepeat)
+            case .extendUp: results.extend(-1, repeatKey: event.isARepeat)
+            case .extendDown: results.extend(1, repeatKey: event.isARepeat)
+            case .first, .home: results.select(0, repeatKey: event.isARepeat)
+            case .last, .end: results.select((results.result?.count ?? 1) - 1, repeatKey: event.isARepeat)
+            case .pageUp: results.page(-1, repeatKey: event.isARepeat)
+            case .pageDown: results.page(1, repeatKey: event.isARepeat)
+            default: break
             }
-            else { openSelected() }
             return true
-        case 48: filters.cycle(flags.contains(.shift) ? -1 : 1); return true
-        case 53: if quickLook.isVisible { quickLook.close() } else { hidePanel?() }; return true
-        case 51 where command: trashSelected(); return true
+        case .selectAll:
+            guard browsingResults else { return false }
+            results.selectAll(); return true
         default: break
         }
-        guard command else { return false }
-        switch key {
-        case "y" where flags.intersection([.command, .control, .option, .shift]) == .command:
-            if !event.isARepeat { previewSelected() }
-            return true
-        case "a" where browsingResults: results.selectAll(); return true
-        case "c":
-            if option { copyName(); return true }
-            if searchField.input.currentEditor()?.selectedRange.length ?? 0 > 0 { return false }
-            copyPath(); return true
-        case "w": hidePanel?(); return true
-        case ",": onSettings?(); return true
-        case "1"..."9": filters.select((Int(key) ?? 1) - 1); return true
-        default: return false
+        if event.isARepeat { return true }
+        switch action {
+        case .add: stashSelection()
+        case .show: toggleStash()
+        case .paste: pasteSelectionInPreviousApp()
+        case .actions: showActions(anchoredTo: footer)
+        case .preview: previewSelected()
+        case .inlinePreview: toggleInlinePreview()
+        case .open:
+            if !browsingResults, !filters.additionalSelected, let path = explicitPath { openExplicitPath(path) }
+            else { openSelected() }
+        case .reveal: revealSelected()
+        case .copyPath: copyPath()
+        case .copyName: copyName()
+        case .trash: trashSelected()
+        case .settings: onSettings?()
+        case .close: hidePanel?()
+        case .nextFilter: filters.cycle(1)
+        case .previousFilter: filters.cycle(-1)
+        case .terminal: openSelectedInTerminal()
+        case .duplicate: duplicateSelectedFiles()
+        case .copyTo: transferSelectedFiles(move: false)
+        case .moveTo: transferSelectedFiles(move: true)
+        default:
+            if StashShortcut.categories.contains(action) { filters.select(action.slot) }
+            else if StashShortcut.quickFilters.contains(action) { return applyQuickFilter(at: action.slot) }
+            else if StashShortcut.scripts.contains(action) {
+                let scripts = FileScript.load(from: preferences)
+                guard scripts.indices.contains(action.slot) else { return false }
+                runFileScript(scripts[action.slot])
+            } else { return false }
         }
+        return true
     }
     private func openExplicitPath(_ path: String) {
         let text = searchField.text
@@ -1181,17 +1204,17 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         menu.autoenablesItems = false
         guard !selected.isEmpty else { return menu }
 
-        action("ctx.open", #selector(contextAction(_:)), enabled: onlineCount > 0)
-        action("ctx.reveal", #selector(contextAction(_:)), enabled: onlineCount > 0, tag: 1)
-        action("ctx.preview", #selector(contextAction(_:)), enabled: selected.first?.source.isOnline == true, tag: 2)
+        StashShortcut.open.chord(in: preferences).apply(to: action("ctx.open", #selector(contextAction(_:)), enabled: onlineCount > 0))
+        StashShortcut.reveal.chord(in: preferences).apply(to: action("ctx.reveal", #selector(contextAction(_:)), enabled: onlineCount > 0, tag: 1))
+        StashShortcut.preview.chord(in: preferences).apply(to: action("ctx.preview", #selector(contextAction(_:)), enabled: selected.first?.source.isOnline == true, tag: 2))
         if !multipleSelected {
             menu.addItem(.separator())
             action("ctx.openWith", #selector(chooseApplication), enabled: allOnline)
-            action("ctx.terminal", #selector(openSelectedInTerminal), enabled: allOnline)
+            StashShortcut.terminal.chord(in: preferences).apply(to: action("ctx.terminal", #selector(openSelectedInTerminal), enabled: allOnline))
             action("scope.inFolder", #selector(scopeToSelection))
         }
         menu.addItem(.separator())
-        action("ctx.duplicate", #selector(duplicateSelectedFiles), enabled: allOnline)
+        StashShortcut.duplicate.chord(in: preferences).apply(to: action("ctx.duplicate", #selector(duplicateSelectedFiles), enabled: allOnline))
         menu.addItem(.separator())
         action("ctx.copyFiles", #selector(copySelectedFiles), enabled: allOnline)
         FileClipboardFormat.addMenu(to: menu, titleKey: "ctx.copyPaths", target: self,
@@ -1202,8 +1225,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         StashShortcut.paste.chord(in: preferences).apply(to: paste)
 
         menu.addItem(.separator())
-        action("ctx.copyTo", #selector(transferSelectedFiles(_:)), enabled: allOnline)
-        action("ctx.moveTo", #selector(transferSelectedFiles(_:)), enabled: allOnline, tag: 1)
+        StashShortcut.copyTo.chord(in: preferences).apply(to: action("ctx.copyTo", #selector(transferSelectedFiles(_:)), enabled: allOnline))
+        StashShortcut.moveTo.chord(in: preferences).apply(to: action("ctx.moveTo", #selector(transferSelectedFiles(_:)), enabled: allOnline, tag: 1))
 
         menu.addItem(.separator())
         let stash = action("stash.add", #selector(stashSelection), enabled: onlineCount > 0)
@@ -1214,7 +1237,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             item.isEnabled = allOnline
         }
         menu.addItem(.separator())
-        action("ctx.trash", #selector(contextAction(_:)), enabled: onlineCount > 0, tag: 7)
+        StashShortcut.trash.chord(in: preferences).apply(to: action("ctx.trash", #selector(contextAction(_:)), enabled: onlineCount > 0, tag: 7))
         action("ctx.exclude", #selector(excludeSelected))
         return menu
     }
@@ -1236,9 +1259,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     @objc private func transferSelectedFiles(_ sender: NSMenuItem) {
+        transferSelectedFiles(move: sender.tag == 1)
+    }
+
+    private func transferSelectedFiles(move: Bool) {
         let paths = selectedOnlineItems.map(\.path)
         guard !snapshot, !paths.isEmpty, paths.count == results.selectedItems.count else { return }
-        let move = sender.tag == 1
         DispatchQueue.main.async { [weak self] in
             guard let self, self.view.window?.isVisible == true else { return }
             self.rememberFocus()
@@ -1287,10 +1313,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         guard !scripts.isEmpty else { return nil }
         let menu = NSMenu()
         for (index, script) in scripts.enumerated() {
-            let key = FileScript.shortcutKeys.indices.contains(index)
-                ? Shortcut.keyEquivalent(FileScript.shortcutKeys[index]) : ""
-            let item = menu.addItem(withTitle: script.name, action: #selector(runFileScriptItem(_:)), keyEquivalent: key)
-            item.keyEquivalentModifierMask = HotKey.modifierFlags(FileScript.shortcutModifiers)
+            let item = menu.addItem(withTitle: script.name, action: #selector(runFileScriptItem(_:)), keyEquivalent: "")
+            if StashShortcut.scripts.indices.contains(index) { StashShortcut.scripts[index].chord(in: preferences).apply(to: item) }
             item.target = self
             item.representedObject = script.path
             item.toolTip = script.path

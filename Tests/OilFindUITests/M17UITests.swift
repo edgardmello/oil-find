@@ -22,13 +22,32 @@ final class M17UITests: XCTestCase {
         controller.view.layoutSubtreeIfNeeded()
         let button = controller.syntax.subviews.compactMap { $0 as? NSButton }[3]
         for label in button.subviews.compactMap({ $0 as? NSTextField }) {
-            let point = label.convert(NSPoint(x: label.bounds.midX, y: label.bounds.midY), to: controller.view)
+            let point = label.convert(NSPoint(x: label.bounds.midX, y: label.bounds.midY), to: controller.syntax.superview)
             XCTAssertTrue(controller.syntax.hitTest(point) === button)
         }
         button.performClick(nil)
         XCTAssertFalse(controller.syntaxVisible)
         XCTAssertEqual(controller.searchField.text, "~/Desktop/ png")
     }
+    func testRemappedSyntaxShortcutUsesTheNewKey() throws {
+        let app = NSApplication.shared
+        let suite = "OilFindSyntaxShortcut-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let chord = StashShortcut.Chord(keyCode: 97, modifiers: 0)
+        StashShortcut.syntax.save(chord, in: defaults)
+        let controller = SearchViewController(snapshot: true, preferences: defaults)
+        _ = controller.view
+        let old = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+                                                 timestamp: 0, windowNumber: 0, context: nil, characters: "/", charactersIgnoringModifiers: "/", isARepeat: false, keyCode: 44))
+        let custom = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                                    timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: UInt16(chord.keyCode)))
+        XCTAssertFalse(controller.handleKey(old))
+        XCTAssertTrue(controller.handleKey(custom))
+        XCTAssertTrue(controller.syntaxVisible)
+        _ = app
+    }
+
     func testLocalizationUsesExactDiagnosticAndCoverageCopy() {
         defer { L10n.snapshotChinese = nil }
         L10n.snapshotChinese = true

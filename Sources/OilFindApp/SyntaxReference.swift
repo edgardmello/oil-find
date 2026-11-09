@@ -1,4 +1,5 @@
 import AppKit
+import OilFindCore
 
 // The tuples mirror site/content/dict.ts; site tests verify every example, explanation and group.
 private final class SyntaxRow: NSButton {
@@ -21,44 +22,32 @@ final class SyntaxReference: FlippedView {
         ["~/Desktop/ png", "Only under the Desktop", "Path"],
         ["dm:today ext:md", "Markdown files changed today", "Date"]
     ]
-    // The side column is app-only: more clickable syntax, then keys including multiple selection and dragging.
-    static let moreZh = [
-        ["foo | bar", "包含任意一个"],
-        ["ext:pdf;docx", "按扩展名"],
-        ["kind:image", "按类型：folder、app、doc、image…"],
-        ["size:>10mb", "按大小，也可写 1mb..5mb"],
-        ["folder:", "只看文件夹，file: 只看文件"],
-        ["regex:^IMG_\\d+", "正则表达式"],
-        ["fuzzy:rdm", "按顺序匹配文件名中的字符"]
-    ]
-    static let moreEn = [
-        ["foo | bar", "Contains either one"],
-        ["ext:pdf;docx", "By extension"],
-        ["kind:image", "By kind: folder, app, doc, image…"],
-        ["size:>10mb", "By size, or 1mb..5mb"],
-        ["folder:", "Folders only, file: for files only"],
-        ["regex:^IMG_\\d+", "Regular expression"],
-        ["fuzzy:rdm", "Match filename characters in order"]
-    ]
-    static let keysZh = [
-        ["↩  ⌘↩", "打开 / 在访达中显示"],
-        ["⌘C  ⌥⌘C", "拷贝路径 / 名称"],
-        ["⌘⌫", "移到废纸篓"],
-        ["⇧ 点按", "选择一段连续的结果"],
-        ["⌘ 点按", "加选或取消某一项"],
-        ["⇧↑  ⇧↓", "用键盘扩展选择"],
-        ["⌘A", "浏览结果时全选"],
-        ["拖移", "拖到访达文件夹即移动，按住 ⌥ 拷贝"]
-    ]
-    static let keysEn = [
-        ["↩  ⌘↩", "Open / Show in Finder"],
-        ["⌘C  ⌥⌘C", "Copy path / name"],
-        ["⌘⌫", "Move to Trash"],
-        ["⇧ Click", "Select a range of results"],
-        ["⌘ Click", "Add or remove one result"],
-        ["⇧↑  ⇧↓", "Extend the selection"],
-        ["⌘A", "Select all while browsing results"],
-        ["Drag", "Move to a Finder folder, ⌥ copies"]
+    private static let more = [
+        ("fuzzy:rdm", "按顺序匹配文件名字符", "Match filename letters in order"),
+        ("'report", "连续匹配文本", "Match contiguous text"),
+        ("vacation photos", "每个词都必须匹配", "Match every word"),
+        ("foo | bar", "匹配任意一个词", "Match either term"),
+        (".jpg .png", "匹配任一扩展名", "Match either extension"),
+        ("ext:pdf;docx", "按扩展名筛选", "Filter by extension"),
+        ("in:Documents", "只在指定文件夹内搜索", "Search inside a folder"),
+        ("depth:2", "最多向下搜索两层", "Search up to two folder levels"),
+        ("folder:photos", "只查找匹配的文件夹", "Find matching folders"),
+        ("file:", "只查找文件", "Find files only"),
+        ("Photos/", "查找文件夹内的项目", "Find items inside Photos"),
+        ("size:>10mb", "按大小筛选", "Filter by file size"),
+        ("modified:7d", "最近七天修改的项目", "Modified in the past seven days"),
+        ("dm:lastweek", "上周修改的项目", "Modified last week"),
+        ("dm:2025-01..2025-03", "按修改日期范围筛选", "Filter by modification date range"),
+        ("^report", "名称以 report 开头", "Name starts with report"),
+        ("report$", "名称以 report 结尾，可带扩展名", "Name ends in report, with optional extension"),
+        ("!.zip", "排除 ZIP 文件", "Exclude ZIP files"),
+        ("!Backups/", "排除文件夹里的项目", "Exclude items inside Backups"),
+        ("!/", "排除文件夹结果", "Exclude folders from results"),
+        ("invoice [client]", "在发票文件内搜索文字", "Find text inside matching files"),
+        ("[invoice|receipt]", "内容匹配任意一项", "Match either term inside the file"),
+        ("content:\"paid invoice\"", "按短语搜索文件内容", "Find a phrase in file contents"),
+        ("#work", "按访达标签搜索（需启用内容索引）", "Find Finder tags with content indexing enabled"),
+        ("regex:^IMG_\\d+", "正则表达式", "Regular expression")
     ]
     private static let moreTag = 100
     var onExample: ((String) -> Void)?
@@ -69,10 +58,18 @@ final class SyntaxReference: FlippedView {
     private var moreButtons: [NSButton] = [], moreExamples: [NSTextField] = [], moreDescriptions: [NSTextField] = []
     private var keyLabels: [NSTextField] = [], keyDescriptions: [NSTextField] = []
     private var rows: [[String]] { L10n.chinese ? Self.zh : Self.en }
-    private var moreRows: [[String]] { L10n.chinese ? Self.moreZh : Self.moreEn }
+    var shortcutPreferences: UserDefaults = .standard
+    private var moreRows: [[String]] { Self.more.map { [$0.0, L10n.chinese ? $0.1 : $0.2] } }
     private var keyRows: [[String]] {
-        [[L10n.text("syntax.previewKeys"), L10n.text("hint.preview")]] + (L10n.chinese ? Self.keysZh : Self.keysEn)
+        let global = Shortcut.symbols(
+            keyCode: UInt32(clamping: shortcutPreferences.object(forKey: "hotKeyCode") as? Int ?? Int(Shortcut.defaultKeyCode)),
+            modifiers: UInt32(clamping: shortcutPreferences.object(forKey: "hotKeyModifiers") as? Int ?? Int(Shortcut.defaultModifiers))
+        )
+        return [[global, L10n.text("settings.shortcut")]] + StashShortcut.allCases.map {
+            [$0.symbols(in: shortcutPreferences), $0.settingsTitle]
+        }
     }
+    var contentHeight: CGFloat { CGFloat(410 + keyLabels.count * 20 + 24) }
     private var split: CGFloat { (bounds.width * 0.54).rounded() }
     override init(frame: NSRect) {
         super.init(frame: frame); wantsLayer = true
@@ -141,12 +138,14 @@ final class SyntaxReference: FlippedView {
             moreExamples[i].frame = NSRect(x: 6, y: 2, width: 122, height: 18)
             moreDescriptions[i].frame = NSRect(x: 132, y: 3, width: max(0, moreButtons[i].bounds.width - 136), height: 17)
         }
-        let keysTop = CGFloat(50 + moreButtons.count * 22 + 16)
-        keysTitle.frame = NSRect(x: x, y: keysTop, width: width, height: 18)
+        let keysTop: CGFloat = 410
+        let keysX: CGFloat = 28
+        let keysWidth = max(0, split - keysX - 20)
+        keysTitle.frame = NSRect(x: keysX, y: keysTop, width: keysWidth, height: 18)
         for i in keyLabels.indices {
             let y = keysTop + 24 + CGFloat(i * 20)
-            keyLabels[i].frame = NSRect(x: x, y: y, width: 90, height: 18)
-            keyDescriptions[i].frame = NSRect(x: x + 96, y: y + 1, width: max(0, width - 96), height: 17)
+            keyLabels[i].frame = NSRect(x: keysX, y: y, width: 90, height: 18)
+            keyDescriptions[i].frame = NSRect(x: keysX + 96, y: y + 1, width: max(0, keysWidth - 96), height: 17)
         }
     }
     override func draw(_ dirtyRect: NSRect) {

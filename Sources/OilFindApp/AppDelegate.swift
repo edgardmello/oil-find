@@ -213,7 +213,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard let self else { return }
                 self.manager?.updateConfig(SettingsPreferences.indexConfig(limited: self.limited))
             }
-            model.onStashShortcutsChange = { [weak self] in self?.refreshStashShortcut() }
+            model.onStashShortcutsChange = { [weak self] in
+                self?.refreshStashShortcut()
+                self?.panel.searchController.refreshShortcuts()
+            }
             model.onPinyinChange = { [weak self] in self?.panel.searchController.startSearch(preserveSelection: true) }
             settingsController = SettingsWindowController(model: model, appExtension: appExtension, externalDrives: externalDrives)
         }

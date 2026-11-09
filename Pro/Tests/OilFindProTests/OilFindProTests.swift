@@ -68,6 +68,10 @@ final class OilFindProTests: XCTestCase {
         XCTAssertEqual(store.read { store.name(matchedID2) }, "notes.md")
         XCTAssertTrue(hits2[0].detail.contains("hyperdrive"))
 
+        let explicit = Query.parse("notes [hyperdrive|missing]", store: store)
+        let explicitHits = manager.prepareSearch(explicit, options: SearchOptions(), sources: [source], isCancelled: { false })()
+        XCTAssertEqual(explicitHits.map(\.entryID), [matchedID2])
+
         // 3. Extension mismatch should filter out the file.
         let query3 = Query.parse("ext:py computeQuantumFluxValue", store: store)
         let work3 = manager.prepareSearch(query3, options: SearchOptions(), sources: [source], isCancelled: { false })

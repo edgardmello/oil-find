@@ -248,12 +248,15 @@ final class SettingsModel: ObservableObject {
         endRecording()
     }
     private func record(_ event: NSEvent) {
-        if event.keyCode == UInt16(kVK_Escape) { cancelRecording(); return }
-        let reset = event.keyCode == UInt16(kVK_Delete) || event.keyCode == UInt16(kVK_ForwardDelete)
+        let recordedModifiers = HotKey.carbonModifiers(event.modifierFlags)
+        if recordedModifiers == 0, event.keyCode == UInt16(kVK_Escape) { cancelRecording(); return }
+        let reset = recordedModifiers == 0 && (event.keyCode == UInt16(kVK_Delete) || event.keyCode == UInt16(kVK_ForwardDelete))
         let fallback = recordingStashShortcut?.defaultChord ?? .init(keyCode: Shortcut.defaultKeyCode, modifiers: Shortcut.defaultModifiers)
         let code = reset ? fallback.keyCode : UInt32(event.keyCode)
-        let mask = reset ? fallback.modifiers : HotKey.carbonModifiers(event.modifierFlags)
-        guard mask & UInt32(cmdKey | controlKey | optionKey) != 0 else {
+        let mask = reset ? fallback.modifiers : recordedModifiers
+        let key = Shortcut.keyEquivalent(code)
+        let functionKey = key.unicodeScalars.first.map { (0xf704...0xf717).contains($0.value) } ?? false
+        guard recordingStashShortcut != nil || functionKey || mask & UInt32(cmdKey | controlKey | optionKey) != 0 else {
             shortcutError = L10n.text("settings.shortcutModifier"); onContentChange?(); return
         }
         let chord = StashShortcut.Chord(keyCode: code, modifiers: mask)
@@ -268,13 +271,14 @@ final class SettingsModel: ObservableObject {
             cancelRecording()
             return
         }
-        if stashShortcuts.values.contains(chord) || FileScript.shortcutSlot(keyCode: code, modifiers: mask) != nil {
+        if stashShortcuts.values.contains(chord) {
             shortcutError = L10n.text("settings.stashShortcutUnavailable"); onContentChange?(); return
         }
         if registerHotKey?(code, mask) == true {
             keyCode = code; modifiers = mask
             UserDefaults.standard.set(Int(code), forKey: "hotKeyCode")
             UserDefaults.standard.set(Int(mask), forKey: "hotKeyModifiers")
+            onStashShortcutsChange?()
             shortcutError = nil
         } else {
             _ = registerHotKey?(keyCode, modifiers)
@@ -337,11 +341,13 @@ private struct SettingsForm: View {
                         Text(L10n.text("settings.shortcut")); Spacer()
                         ShortcutRecorder(model: model).frame(width: 120, height: 24)
                     }
-                    ForEach(StashShortcut.allCases, id: \.self) { target in
-                        HStack {
-                            Text(target.settingsTitle)
-                            Spacer()
-                            ShortcutRecorder(model: model, stashShortcut: target).frame(width: 120, height: 24)
+                    DisclosureGroup(L10n.text("syntax.keys")) {
+                        ForEach(StashShortcut.allCases.filter { !StashShortcut.scripts.contains($0) }, id: \.self) { target in
+                            HStack {
+                                Text(target.settingsTitle)
+                                Spacer()
+                                ShortcutRecorder(model: model, stashShortcut: target).frame(width: 120, height: 24)
+                            }
                         }
                     }
                     hint(L10n.text("settings.stashShortcutHint"))
@@ -419,9 +425,8 @@ private struct SettingsForm: View {
                     HStack {
                         Text(script.name).lineLimit(1).truncationMode(.middle).help(script.path)
                         Spacer()
-                        if FileScript.shortcutKeys.indices.contains(index) {
-                            Text(Shortcut.symbols(keyCode: FileScript.shortcutKeys[index], modifiers: FileScript.shortcutModifiers))
-                                .foregroundStyle(.secondary)
+                        if StashShortcut.scripts.indices.contains(index) {
+                            ShortcutRecorder(model: model, stashShortcut: StashShortcut.scripts[index]).frame(width: 120, height: 24)
                         }
                         Button { model.removeFileScript(script) } label: {
                             Image(systemName: "minus.circle")
