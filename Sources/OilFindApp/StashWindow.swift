@@ -8,6 +8,7 @@ final class StashWindow: NSWindowController, NSTableViewDataSource, NSTableViewD
     private let status = NSTextField(labelWithString: "")
     private let copy = NSButton()
     private let remove = NSButton()
+    private let clear = NSButton()
     private var displayedFiles: [StashedFile] = []
     private var urls: [UUID: URL] = [:]
     private var generation = 0
@@ -41,7 +42,7 @@ final class StashWindow: NSWindowController, NSTableViewDataSource, NSTableViewD
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
 
-        for (button, action) in [(copy, #selector(copyFiles)), (remove, #selector(removeFiles))] {
+        for (button, action) in [(copy, #selector(copyFiles)), (remove, #selector(removeFiles)), (clear, #selector(clearFiles))] {
             button.bezelStyle = .rounded
             button.target = self
             button.action = action
@@ -51,7 +52,7 @@ final class StashWindow: NSWindowController, NSTableViewDataSource, NSTableViewD
         status.lineBreakMode = .byTruncatingTail
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         status.textColor = .secondaryLabelColor
-        let footer = NSStackView(views: [status, remove, copy])
+        let footer = NSStackView(views: [status, clear, remove, copy])
         footer.spacing = 8
         footer.alignment = .centerY
         let content = NSView()
@@ -101,6 +102,10 @@ final class StashWindow: NSWindowController, NSTableViewDataSource, NSTableViewD
     private func localize() {
         window?.title = L10n.text("stash.title")
         copy.title = L10n.text("stash.copy")
+        clear.title = L10n.text("stash.clear")
+        let clearChord = StashShortcut.clearStash.chord(in: preferences)
+        clear.keyEquivalent = Shortcut.keyEquivalent(clearChord.keyCode)
+        clear.keyEquivalentModifierMask = HotKey.modifierFlags(clearChord.modifiers)
         remove.title = L10n.text("stash.remove")
         let chord = StashShortcut.remove.chord(in: preferences)
         remove.keyEquivalent = Shortcut.keyEquivalent(chord.keyCode)
@@ -144,6 +149,7 @@ final class StashWindow: NSWindowController, NSTableViewDataSource, NSTableViewD
     private func updateButtons() {
         copy.isEnabled = !resolving && !copying && filesToCopy.contains { urls[$0.id] != nil }
         remove.isEnabled = !selectedFiles.isEmpty
+        clear.isEnabled = !stash.files.isEmpty
         if stash.files.isEmpty { status.stringValue = L10n.text("stash.empty") }
         else if resolving { status.stringValue = L10n.text("stash.checking") }
         else if urls.count < stash.files.count {
@@ -170,6 +176,8 @@ final class StashWindow: NSWindowController, NSTableViewDataSource, NSTableViewD
             }
         }
     }
+
+    @objc private func clearFiles() { stash.clear() }
 
     @objc private func removeFiles() {
         stash.remove(Set(selectedFiles.map(\.id)))

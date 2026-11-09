@@ -54,6 +54,19 @@ final class SearchAccessoryTests: XCTestCase {
         XCTAssertTrue(controller.handleKey(try key(.remove)))
         XCTAssertTrue(stash.isHidden)
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("stash-example.txt").path))
+
+        XCTAssertTrue(app.sendAction(NSSelectorFromString("stashSelection"), to: controller, from: nil))
+        let addedAgain = Date().addingTimeInterval(2)
+        while stash.isHidden && Date() < addedAgain {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertEqual(table.numberOfRows, 1)
+        XCTAssertTrue(controller.handleKey(try key(.show)))
+        XCTAssertTrue(stash.isHidden)
+        XCTAssertTrue(controller.handleKey(try key(.clearStash)))
+        XCTAssertTrue(controller.handleKey(try key(.show)))
+        XCTAssertTrue(stash.isHidden)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("stash-example.txt").path))
     }
 
     func testQuickFilterRestoresSavedFilenameModeAndSortAndReadsLegacyFilters() throws {

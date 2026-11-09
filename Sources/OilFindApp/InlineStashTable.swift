@@ -21,6 +21,7 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
     private let table = StashTableView()
     private let compactHeader = CompactFileHeader(stash: true)
     private let icons = IconProvider()
+    var onClear: (() -> Void)?
     var onCopyAll: (() -> Void)?
     var onOpenWindow: (() -> Void)?
     private var files: [StashedFile] = []
@@ -219,11 +220,20 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
         remove.tag = 5
         StashShortcut.remove.chord(in: shortcutPreferences).apply(to: remove)
         remove.isEnabled = !selection.isEmpty
+        let clear = menu.addItem(withTitle: L10n.text("stash.clear"), action: #selector(stashHeaderAction(_:)), keyEquivalent: "")
+        clear.target = self
+        clear.tag = 2
+        StashShortcut.clearStash.chord(in: shortcutPreferences).apply(to: clear)
         return menu
     }
 
     @objc private func stashHeaderAction(_ item: NSMenuItem) {
-        if item.tag == 0 { onCopyAll?() } else { onOpenWindow?() }
+        switch item.tag {
+        case 0: onCopyAll?()
+        case 1: onOpenWindow?()
+        case 2: onClear?()
+        default: break
+        }
     }
 
     private func makeMenu() -> NSMenu {

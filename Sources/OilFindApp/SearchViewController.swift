@@ -85,9 +85,13 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
     func panelDidHide() {
         setInlinePreviewVisible(false, resize: false)
+        requestApplicationSuggestions(for: nil)
         additionalSearchProvider?.visibilityChanged(false)
         supplementaryProvider?.userActivity(visible: false, typing: false)
     }
+    private let applicationSuggestionsQueue = DispatchQueue(label: "com.oiloil.find.openWith", qos: .userInitiated)
+    private var applicationSuggestionsWork: DispatchWorkItem?
+    private var applicationSuggestionsFile: URL?
     private let additionalQueue = DispatchQueue(label: "com.oiloil.find.additional", qos: .userInitiated)
     private let supplementQueue = DispatchQueue(label: "com.oiloil.find.supplement", qos: .userInteractive)
     var additionalSources: (() -> [SearchSource])?
@@ -152,7 +156,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         syntaxScroll.isHidden = true
         inlinePreview.isHidden = true
         syntax.shortcutPreferences = preferences
-        accessories.setShortcutPreferences(preferences)
+        accessories.configureStashControls(preferences: preferences) { [weak self] in self?.clearStash() }
         refreshShortcuts()
         syntax.onExample = { [weak self] example in
             guard let self else { return }; self.setBrowsing(false); self.searchField.text = example; self.toggleSyntax(false); self.searchField.focus(); self.startSearch()
@@ -179,6 +183,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         results.onSelection = { [weak self] in
             self?.quickLook.refresh()
             self?.refreshInlinePreview()
+            self?.refreshApplicationSuggestions()
             self?.footer.fileActions = self?.results.selectedAdditional == nil
             if let self, let item = self.results.selectedItem {
                 self.selectionAnchor = (item.source.id, item.source.store, item.id, item.path)
@@ -188,6 +193,11 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                 if multiple || self.footerShowsSelection { self.updateFooter(result) }
                 self.footerShowsSelection = multiple
             }
+        }
+        footer.onChooseApplication = { [weak self] in self?.chooseApplication() }
+        footer.onOpenApplication = { [weak self] app in
+            guard let self, let file = self.applicationSuggestionsFile else { return }
+            self.openWithApplication(app, file: file)
         }
         results.onContextMenu = { [weak self] _ in self?.contextMenu() }
         results.onRefreshApplied = { [weak self] result in self?.resultDidChange(result) }
@@ -248,7 +258,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         accessories.isHidden = syntaxVisible || accessoryHeight == 0
         accessories.frame = NSRect(x: 0, y: 104 + px, width: w, height: accessoryHeight)
         let top: CGFloat = 104 + px + accessoryHeight
-        let region = NSRect(x: 0, y: top, width: w, height: max(0, h - top - 34 - px))
+        let footerHeight = footer.desiredHeight
+        let region = NSRect(x: 0, y: top, width: w, height: max(0, h - top - footerHeight - px))
         let previewWidth = inlinePreviewVisible && !syntaxVisible ? min(400, floor(region.width * 0.36)) : 0
         let list = NSRect(x: 0, y: top, width: w - previewWidth, height: region.height)
         [results, empty, indexing].forEach { $0.frame = list }
@@ -256,14 +267,15 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         syntax.frame = NSRect(origin: .zero, size: NSSize(width: syntaxScroll.contentSize.width,
                                                            height: max(region.height, syntax.contentHeight)))
         inlinePreview.frame = NSRect(x: list.maxX, y: top, width: previewWidth, height: region.height)
-        bottomLine.frame = NSRect(x: 0, y: h - 34 - px, width: w, height: px)
-        footer.frame = NSRect(x: 0, y: h - 34, width: w, height: 34)
+        bottomLine.frame = NSRect(x: 0, y: h - footerHeight - px, width: w, height: px)
+        footer.frame = NSRect(x: 0, y: h - footerHeight, width: w, height: footerHeight)
     }
     func setState(_ state: StateView.State?) {
         _ = view
         let previous: NSView = stateView ?? (results as NSView)
         stateView = state == .empty ? empty : state == .indexing ? indexing : nil
         refreshInlinePreview()
+        refreshApplicationSuggestions()
         let target: NSView = stateView ?? (results as NSView)
         footer.actionable = !syntaxVisible && stateView == nil && (results.result?.total ?? 0) > 0
         guard previous !== target else { return }
@@ -524,6 +536,15 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         restoreFocus()
     }
 
+    private func clearStash() {
+        guard !snapshot else { return }
+        let count = fileStash.clear()
+        guard count > 0 else { return }
+        refreshAccessories()
+        footer.warning = false
+        footer.text = L10n.text("stash.cleared", Presentation.countText(count))
+    }
+
     private func copyStash() {
         guard !copyingStash else { return }
         let files = fileStash.files
@@ -548,6 +569,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     func panelWillShow() {
+        refreshApplicationSuggestions()
         filters.scopeActive = folderScope != nil || volumeScope != nil || hiddenOnly || fuzzyNames
         refreshAccessories()
         additionalSearchProvider?.visibilityChanged(true)
@@ -742,6 +764,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let visible = show ?? !syntaxVisible
         syntaxVisible = visible
         refreshInlinePreview()
+        refreshApplicationSuggestions()
         view.needsLayout = true
         footer.actionable = !visible && stateView == nil && (results.result?.total ?? 0) > 0
         syntaxScroll.isHidden = false
@@ -917,6 +940,10 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if let handled = accessories.handleStashKey(event, action: action) { return handled }
         if action == .syntax {
             if !event.isARepeat { toggleSyntax() }
+            return true
+        }
+        if action == .clearStash {
+            if !event.isARepeat { clearStash() }
             return true
         }
         if action == .escape {
@@ -1410,6 +1437,42 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         footer.warning = false
         footer.text = L10n.text("scope.exclusionSaved")
     }
+    private func refreshApplicationSuggestions() {
+        guard !snapshot, !syntaxVisible, stateView == nil, results.selectionCount == 1,
+              let item = selectedOnlineItems.first, item.flags & SiftFlag.dir == 0 else {
+            requestApplicationSuggestions(for: nil)
+            return
+        }
+        requestApplicationSuggestions(for: URL(fileURLWithPath: item.path))
+    }
+
+    private func requestApplicationSuggestions(for file: URL?) {
+        guard file != applicationSuggestionsFile else { return }
+        applicationSuggestionsWork?.cancel()
+        applicationSuggestionsFile = file
+        footer.setApplications([], pending: file != nil)
+        view.needsLayout = true
+        guard let file else { return }
+        let work = DispatchWorkItem { [weak self] in
+            let workspace = NSWorkspace.shared
+            let defaultApp = workspace.urlForApplication(toOpen: file)
+            let installed = workspace.urlsForApplications(toOpen: file)
+            var seen = Set<URL>()
+            let apps = ([defaultApp].compactMap { $0 } + installed).filter { seen.insert($0).inserted }.map { url in
+                let icon = (workspace.icon(forFile: url.path).copy() as? NSImage) ?? NSImage(size: .zero)
+                icon.size = NSSize(width: 16, height: 16)
+                return FooterBar.Application(url: url, name: FileManager.default.displayName(atPath: url.path), icon: icon)
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.applicationSuggestionsFile == file else { return }
+                self.footer.setApplications(apps)
+                self.view.needsLayout = true
+            }
+        }
+        applicationSuggestionsWork = work
+        applicationSuggestionsQueue.asyncAfter(deadline: .now() + 0.10, execute: work)
+    }
+
     @objc private func chooseApplication() {
         guard let file = selectedURL, !multipleSelected, allowOnlineAction() else { return }
         let location = view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)
@@ -1435,8 +1498,13 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     @objc private func openWithApplication(_ item: NSMenuItem) {
-        guard let urls = item.representedObject as? [URL], urls.count == 2, selectedURL == urls[0], allowOnlineAction() else { return }
-        NSWorkspace.shared.open([urls[0]], withApplicationAt: urls[1], configuration: .init()) { [weak self] _, error in
+        guard let urls = item.representedObject as? [URL], urls.count == 2 else { return }
+        openWithApplication(urls[1], file: urls[0])
+    }
+
+    private func openWithApplication(_ application: URL, file: URL) {
+        guard !multipleSelected, selectedURL == file, allowOnlineAction() else { return }
+        NSWorkspace.shared.open([file], withApplicationAt: application, configuration: .init()) { [weak self] _, error in
             DispatchQueue.main.async {
                 if error == nil { self?.hidePanel?() }
                 else { NSSound.beep() }

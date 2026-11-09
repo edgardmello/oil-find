@@ -66,6 +66,15 @@ final class FileStash {
         persist()
     }
 
+    @discardableResult
+    func clear() -> Int {
+        let count = files.count
+        guard count > 0 else { return 0 }
+        files.removeAll()
+        persist()
+        return count
+    }
+
     func resolve(_ files: [StashedFile], completion: @escaping ([UUID: URL]) -> Void) {
         queue.async {
             let urls = Dictionary(uniqueKeysWithValues: files.compactMap { item in
