@@ -595,7 +595,8 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                     .replacingOccurrences(of: "*", with: "")
                 guard escaped.count >= 2 else { continue }
                 let mods = term.caseSensitive ? "w" : "cdw"
-                altStrings.append("kMDItemTextContent == \"\(escaped)*\"\(mods)")
+                // Spotlight's word mode matches word prefixes with `*`, and whole words without it.
+                altStrings.append("kMDItemTextContent == \"\(escaped)\(term.wholeWords ? "" : "*")\"\(mods)")
             }
             guard !altStrings.isEmpty else { continue }
             if altStrings.count == 1 {
@@ -866,8 +867,8 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                     break
                 }
                 switch atom.matcher {
-                case .content(let text):
-                    terms.append(ContentTerm(text: text, caseSensitive: false))
+                case .content(let text, let wholeWords):
+                    terms.append(ContentTerm(text: text, caseSensitive: false, wholeWords: wholeWords))
                 case .name(let needle, let cs) where !hasExplicitContent:
                     let str = String(decoding: needle, as: UTF8.self)
                     if str.isEmpty { isPureContentClause = false } else { terms.append(ContentTerm(text: str, caseSensitive: cs)) }

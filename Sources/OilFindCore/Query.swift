@@ -201,7 +201,7 @@ public struct Query {
                 if !wholePath, !neg, body.hasPrefix("["), body.hasSuffix("]"), body.count > 2 {
                     let contents = body.dropFirst().dropLast()
                     let terms = quoted ? [contents] : contents.split(separator: "|")
-                    alts.append(contentsOf: terms.map { Atom(negated: false, matcher: .content(String($0))) })
+                    alts.append(contentsOf: terms.map { Atom(negated: false, matcher: .content(String($0), wholeWords: quoted)) })
                     if i + 1 == tokens.count || tokens[i + 1].body != "|" { flushClause() }
                     continue
                 }
@@ -269,7 +269,8 @@ public enum Matcher {
     case size(ClosedRange<UInt64>)
     case modified(ClosedRange<UInt32>)
     case tag(String)
-    case content(String)
+    /// Text inside files. With `wholeWords`, a quoted term such as `["jane"]` does not match "janeiro".
+    case content(String, wholeWords: Bool = false)
 }
 private func extKey(_ s: String) -> UInt64? {
     let b = Array(s.lowercased().utf8); guard (1...8).contains(b.count), b.allSatisfy({ $0 < 128 }) else { return nil }
@@ -308,7 +309,7 @@ private func parseMatcher(_ body: String, quoted: Bool, now: Date, home: String,
         case "path": return .path(components: pathComponents(value.lowercased(), home: home))
         case "fuzzy" where !value.isEmpty: return .fuzzyName(Array(value.lowercased().utf8))
         case "case": return .name(needle: Array(value.utf8), caseSensitive: true)
-        case "content" where !value.isEmpty: return .content(value)
+        case "content" where !value.isEmpty: return .content(value, wholeWords: quoted)
         case "tag": return .tag(value.trimmingCharacters(in: .whitespaces))
         case "regex":
             do { return .regex(try NSRegularExpression(pattern: value), onPath: value.contains("/")) }

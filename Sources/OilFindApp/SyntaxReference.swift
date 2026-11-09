@@ -45,6 +45,7 @@ final class SyntaxReference: FlippedView {
         ("!/", "排除文件夹结果", "Exclude folders from results"),
         ("invoice [client]", "在发票文件内搜索文字", "Find text inside matching files"),
         ("[invoice|receipt]", "内容匹配任意一项", "Match either term inside the file"),
+        ("*.pdf [\"jane\"]", "引号内只匹配完整单词", "Quotes match whole words only, not janeiro"),
         ("content:\"paid invoice\"", "按短语搜索文件内容", "Find a phrase in file contents"),
         ("#work", "按访达标签搜索（需启用内容索引）", "Find Finder tags with content indexing enabled"),
         ("regex:^IMG_\\d+", "正则表达式", "Regular expression")

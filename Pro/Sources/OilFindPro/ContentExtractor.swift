@@ -7,10 +7,32 @@ import Vision
 public struct ContentTerm: Equatable {
     public let text: String
     public let caseSensitive: Bool
+    /// Only match where the text starts and ends at word boundaries.
+    public let wholeWords: Bool
 
-    public init(text: String, caseSensitive: Bool) {
+    public init(text: String, caseSensitive: Bool, wholeWords: Bool = false) {
         self.text = text
         self.caseSensitive = caseSensitive
+        self.wholeWords = wholeWords
+    }
+
+    /// The first occurrence in `body`, honouring case and word boundaries.
+    public func range(in body: String) -> Range<String.Index>? {
+        let options: String.CompareOptions = caseSensitive ? [] : [.caseInsensitive, .diacriticInsensitive]
+        var searchRange = body.startIndex..<body.endIndex
+        while let found = body.range(of: text, options: options, range: searchRange) {
+            guard wholeWords else { return found }
+            let before = found.lowerBound > body.startIndex ? body[body.index(before: found.lowerBound)] : nil
+            let after = found.upperBound < body.endIndex ? body[found.upperBound] : nil
+            if !Self.isWordCharacter(before) && !Self.isWordCharacter(after) { return found }
+            searchRange = body.index(after: found.lowerBound)..<body.endIndex
+        }
+        return nil
+    }
+
+    private static func isWordCharacter(_ character: Character?) -> Bool {
+        guard let character else { return false }
+        return character.isLetter || character.isNumber || character == "_"
     }
 }
 
@@ -289,18 +311,11 @@ public enum ContentExtractor {
 
     public static func matches(body: String, clauses: [[ContentTerm]], excluded: [ContentTerm]) -> Bool {
         guard !clauses.isEmpty else { return false }
-        for neg in excluded {
-            let options: String.CompareOptions = neg.caseSensitive ? [] : [.caseInsensitive, .diacriticInsensitive]
-            if body.range(of: neg.text, options: options) != nil {
-                return false
-            }
+        for neg in excluded where neg.range(in: body) != nil {
+            return false
         }
-        for clause in clauses {
-            let satisfied = clause.contains { term in
-                let options: String.CompareOptions = term.caseSensitive ? [] : [.caseInsensitive, .diacriticInsensitive]
-                return body.range(of: term.text, options: options) != nil
-            }
-            if !satisfied { return false }
+        for clause in clauses where !clause.contains(where: { $0.range(in: body) != nil }) {
+            return false
         }
         return true
     }
@@ -312,8 +327,7 @@ public enum ContentExtractor {
         }
         var firstMatch: Range<String.Index>?
         for term in nonEmptyTerms {
-            let options: String.CompareOptions = term.caseSensitive ? [] : [.caseInsensitive, .diacriticInsensitive]
-            if let range = body.range(of: term.text, options: options) {
+            if let range = term.range(in: body) {
                 if firstMatch == nil || range.lowerBound < firstMatch!.lowerBound {
                     firstMatch = range
                 }

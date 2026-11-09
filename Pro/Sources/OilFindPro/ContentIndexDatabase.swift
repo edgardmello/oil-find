@@ -204,6 +204,9 @@ public final class ContentIndexDatabase {
         guard let db = readerDB else { return [] }
 
         let ftsExpr = Self.buildFTSExpression(clauses: clauses)
+        // Trigram matches are substrings, so whole-word terms ("jane", not "janeiro") need more rows to filter.
+        let wholeWords = clauses.joined().contains(where: \.wholeWords)
+        let rowLimit = Int32(clamping: max(limit * (wholeWords ? 20 : 4), 400))
         var stmt: OpaquePointer?
         let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -218,7 +221,7 @@ public final class ContentIndexDatabase {
                 """
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
                 _ = ftsExpr.withCString { sqlite3_bind_text(stmt, 1, $0, -1, transient) }
-                sqlite3_bind_int(stmt, 2, Int32(max(limit * 4, 400)))
+                sqlite3_bind_int(stmt, 2, rowLimit)
             }
         } else if let anchor = clauses.first?.first?.text, !anchor.isEmpty {
             let sql = """
@@ -230,7 +233,7 @@ public final class ContentIndexDatabase {
                 """
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
                 _ = anchor.withCString { sqlite3_bind_text(stmt, 1, $0, -1, transient) }
-                sqlite3_bind_int(stmt, 2, Int32(max(limit * 4, 400)))
+                sqlite3_bind_int(stmt, 2, rowLimit)
             }
         }
 

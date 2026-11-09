@@ -78,6 +78,32 @@ final class OilFindProTests: XCTestCase {
         XCTAssertTrue(work3().isEmpty)
     }
 
+    func testQuotedContentTermsMatchWholeWordsOnly() {
+        func contentAtoms(_ text: String) -> [(String, Bool)] {
+            Query.parse(text).clauses.flatMap(\.alternatives).compactMap { atom in
+                if case .content(let value, let wholeWords) = atom.matcher { return (value, wholeWords) }
+                return nil
+            }
+        }
+        XCTAssertEqual(contentAtoms("*.pdf [jane]").map(\.1), [false])
+        XCTAssertEqual(contentAtoms("*.pdf [\"jane\"]").map(\.0), ["jane"])
+        XCTAssertEqual(contentAtoms("*.pdf [\"jane\"]").map(\.1), [true])
+        XCTAssertEqual(contentAtoms("content:\"jane doe\"").map(\.1), [true])
+        XCTAssertEqual(contentAtoms("content:jane").map(\.1), [false])
+
+        let word = ContentTerm(text: "jane", caseSensitive: false, wholeWords: true)
+        let part = ContentTerm(text: "jane", caseSensitive: false)
+        for body in ["Rio de Janeiro", "a janela abriu", "janes", "mejane"] {
+            XCTAssertFalse(ContentExtractor.matches(body: body, clauses: [[word]], excluded: []), body)
+            XCTAssertTrue(ContentExtractor.matches(body: body, clauses: [[part]], excluded: []), body)
+        }
+        for body in ["Jane Doe", "filha de JANE.", "(jane)", "Janeiro e Jane", "Jâne"] {
+            XCTAssertTrue(ContentExtractor.matches(body: body, clauses: [[word]], excluded: []), body)
+        }
+        let snippet = ContentExtractor.makePresentation(body: "Rio de Janeiro, assinado por Jane Doe", terms: [word], prefix: "")
+        XCTAssertTrue(snippet.text.contains("Jane Doe"), snippet.text)
+    }
+
     func testImagesAreIndexedByRecognizedTextAndLabels() throws {
         XCTAssertEqual(ContentExtractor.fileCategory(name: "Holiday.JPG", kind: 4, size: 1_000), .image)
         XCTAssertNil(ContentExtractor.fileCategory(name: "huge.png", kind: 4, size: ContentExtractor.maxImageFileSize + 1))
