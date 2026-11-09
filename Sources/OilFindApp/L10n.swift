@@ -209,6 +209,7 @@ enum L10n {
         "stash.copy": ("拷贝文件", "Copy Files"),
         "stash.copied": ("已拷贝 %@ 项", "Copied %@ files"),
         "stash.remove": ("移除", "Remove"),
+        "scope.fuzzyNames": ("模糊文件名搜索", "Fuzzy Filename Search"),
         "scope.hiddenOnly": ("仅显示隐藏项目", "Hidden Items Only"),
         "scope.exclusionSaved": ("已添加排除规则，正在更新索引…", "Exclusion saved. Updating the index…"),
         "quickFilter.title": ("快速筛选", "Quick Filters"),

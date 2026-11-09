@@ -93,6 +93,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private var sourceCacheStores: [String: ObjectIdentifier] = [:]
     private var folderScope: String?
     private var volumeScope: String?
+    private lazy var fuzzyNames = !snapshot && preferences.bool(forKey: "fuzzyNames")
     private var hiddenOnly = false
     private var sortingRecent: Bool { !hiddenOnly && folderScope == nil && searchField.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var scopedSources: [SearchSource] {
@@ -307,6 +308,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let hidden = menu.addItem(withTitle: L10n.text("scope.hiddenOnly"), action: #selector(toggleHiddenOnly), keyEquivalent: "")
         hidden.target = self
         hidden.state = hiddenOnly ? .on : .off
+        let fuzzy = menu.addItem(withTitle: L10n.text("scope.fuzzyNames"), action: #selector(toggleFuzzyNames), keyEquivalent: "")
+        fuzzy.target = self
+        fuzzy.state = fuzzyNames ? .on : .off
         let quick = menu.addItem(withTitle: L10n.text("quickFilter.title"), action: nil, keyEquivalent: "")
         quick.submenu = makeQuickFilterMenu()
         menu.addItem(.separator())
@@ -355,6 +359,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             item.submenu = remove
         }
         return menu
+    }
+
+    @objc private func toggleFuzzyNames() {
+        fuzzyNames.toggle()
+        if !snapshot { preferences.set(fuzzyNames, forKey: "fuzzyNames") }
+        scopeChanged()
     }
 
     @objc private func toggleHiddenOnly() {
@@ -435,7 +445,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     private func scopeChanged(resetAdditional: Bool = true) {
-        filters.scopeActive = folderScope != nil || volumeScope != nil || hiddenOnly
+        filters.scopeActive = folderScope != nil || volumeScope != nil || hiddenOnly || fuzzyNames
         if resetAdditional && filters.additionalSelected { filters.select(0, notify: false) }
         refreshAdditionalFilter()
         refreshAccessories()
@@ -466,6 +476,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                 self.filters.select(0, notify: false)
                 self.scopeChanged()
             }))
+        }
+        if fuzzyNames && !filters.additionalSelected {
+            chips.append((L10n.text("scope.fuzzyNames") + " ×", { [weak self] in self?.toggleFuzzyNames() }))
         }
         accessories.setFilters(chips)
         let files = snapshot ? [] : fileStash.files
@@ -514,6 +527,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     func panelWillShow() {
+        filters.scopeActive = folderScope != nil || volumeScope != nil || hiddenOnly || fuzzyNames
         refreshAccessories()
         additionalSearchProvider?.visibilityChanged(true)
         setBrowsing(false)
@@ -524,7 +538,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if additionalSearchProvider?.isEnabled != true, let result = results.result, result.isCurrent(sources),
            (result.single != nil || result.multiple != nil || sources.isEmpty),
            result.query.raw == currentQuery.raw, result.query.folderScope == currentQuery.folderScope,
-           result.query.hiddenOnly == currentQuery.hiddenOnly, !currentQuery.isTimeDependent,
+           result.query.hiddenOnly == currentQuery.hiddenOnly, result.query.fuzzyNames == currentQuery.fuzzyNames, !currentQuery.isTimeDependent,
            Date().timeIntervalSince(result.createdAt) <= 600 { return }
         startSearch(preserveSelection: true)
     }
@@ -683,7 +697,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         resultDidChange(result)
     }
     private func editingQuery(store: IndexStore?) -> Query {
-        var query = Query.parse(searchField.text, store: store, editingRange: searchField.input.currentEditor() == nil ? nil : searchField.editor.selectedRange(), isComposing: searchField.editor.hasMarkedText(), pathExists: { [self] path in
+        var query = Query.parse(searchField.text, store: store, editingRange: searchField.input.currentEditor() == nil ? nil : searchField.editor.selectedRange(), isComposing: searchField.editor.hasMarkedText(), fuzzyNames: fuzzyNames && !filters.additionalSelected, pathExists: { [self] path in
             if searchSources.contains(where: { source in source.store.read { source.store.containsPath(path) } }) { return true }
             var info = stat(); return path.withCString { stat($0, &info) == 0 }
         })

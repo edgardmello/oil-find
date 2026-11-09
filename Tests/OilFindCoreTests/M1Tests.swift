@@ -146,6 +146,27 @@ final class M1Tests: XCTestCase {
         }
         for s in ["foo:bar","size:abc","dm:not-a-date"] { if case .name = Query.parse(s).clauses[0].alternatives[0].matcher {} else { XCTFail("expected fallback \(s)") } }
     }
+    func testFuzzyFilenameModePreservesExplicitSyntaxAndSeparatesCacheEntries() throws { try withFixture { f in
+        let normal = Query.parse("pht ext:jpg")
+        let fuzzy = Query.parse(normal.raw, fuzzyNames: true)
+        let normalResult = try XCTUnwrap(Searcher.search(normal, in: f.store))
+        XCTAssertTrue(normalResult.items.isEmpty)
+        let result = try XCTUnwrap(Searcher.search(fuzzy, in: f.store, previous: normalResult))
+        XCTAssertEqual(Set(result.items.map { f.store.name($0) }), ["photo10.jpg", "photo2.jpg"])
+
+        let cache = SearchCache()
+        cache.insert(normalResult)
+        XCTAssertNil(cache.lookup(query: fuzzy, options: .init(), store: f.store))
+        cache.insert(result)
+        XCTAssertTrue(cache.lookup(query: normal, options: .init(), store: f.store) === normalResult)
+
+        for text in ["\"pht\" ext:jpg", "!pht ext:jpg", "case:PHT ext:jpg", "ph?to*.jpg"] {
+            let literal = try XCTUnwrap(Searcher.search(Query.parse(text), in: f.store))
+            let withMode = try XCTUnwrap(Searcher.search(Query.parse(text, fuzzyNames: true), in: f.store))
+            XCTAssertEqual(literal.items, withMode.items, text)
+        }
+    } }
+
     func testFuzzyFilenameSearchCombinesWithFiltersAndPreservesNormalSearch() throws { try withFixture { f in
         XCTAssertTrue(f.ids("pht").isEmpty)
         XCTAssertEqual(f.ids("fuzzy:PHT ext:jpg"), Set(["photo10.jpg", "photo2.jpg"].map { f.root.appendingPathComponent($0).path }))
