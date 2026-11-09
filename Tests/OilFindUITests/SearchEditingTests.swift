@@ -29,6 +29,7 @@ final class SearchEditingTests: XCTestCase {
         XCTAssertEqual(controller.searchField.text, "invoice")
         XCTAssertEqual(controller.filters.options.kind, Query.kindValue("doc"))
         XCTAssertTrue(controller.filters.scopeActive)
+        XCTAssertTrue(controller.filters.searchOptionsActive)
         XCTAssertTrue(QuickFilter.load(from: preferences).first?.hiddenOnly == true)
     }
 
