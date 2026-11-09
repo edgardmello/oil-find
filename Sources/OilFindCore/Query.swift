@@ -18,6 +18,7 @@ public struct Query {
         query.clauses.append(Clause(alternatives: [Atom(negated: false, matcher: .subtree(path))]))
         return query
     }
+    public private(set) var fuzzyNames = false
     public private(set) var hiddenOnly = false
     public func showingOnlyHiddenFiles() -> Query {
         guard !hiddenOnly else { return self }
@@ -86,7 +87,7 @@ public struct Query {
     }
     public static func parse(_ text: String, now: Date = Date(), home: String = NSHomeDirectory(),
                              store: IndexStore? = nil, editingRange: NSRange? = nil, isComposing: Bool = false,
-                             pathExists: ((String) -> Bool)? = nil) -> Query {
+                             fuzzyNames: Bool = false, pathExists: ((String) -> Bool)? = nil) -> Query {
         let source = normalizePaste(text).precomposedStringWithCanonicalMapping
         var clauses: [Clause] = [], alts: [Atom] = [], diagnostics: [QueryDiagnostic] = []
         func flushClause() {
@@ -156,7 +157,12 @@ public struct Query {
                     if !isComposing && !editing { diagnostics.append(d) }
                 } else {
                     let ordinary = !body.contains(":") && !body.contains("/") && !body.hasPrefix("~") && !body.contains("*") && !body.contains("?")
-                    alts.append(Atom(negated: neg, matcher: matcher, excludesAncestors: neg && ordinary))
+                    var resolved = matcher
+                    if fuzzyNames && ordinary && !neg, case .name(let needle, false) = matcher,
+                       let range = Range(t.range, in: source), !source[range].contains("\"") {
+                        resolved = .fuzzyName(needle)
+                    }
+                    alts.append(Atom(negated: neg, matcher: resolved, excludesAncestors: neg && ordinary))
                 }
             }
             if i + 1 == tokens.count || tokens[i + 1].body != "|" { flushClause() }
@@ -166,7 +172,7 @@ public struct Query {
         if clauses.isEmpty && tokens.contains(where: { $0.body != "|" }) {
             clauses = [Clause(alternatives: [Atom(negated: false, matcher: .name(needle: Array(source.lowercased().utf8), caseSensitive: false))])]
         }
-        return Query(clauses: clauses, raw: source, diagnostics: diagnostics)
+        return Query(clauses: clauses, raw: source, diagnostics: diagnostics, fuzzyNames: fuzzyNames)
     }
 }
 public struct Clause { public var alternatives: [Atom] }

@@ -58,7 +58,7 @@ public final class SearchCache {
 
     private func matches(_ result: SearchResult, query: Query, options: SearchOptions, store: IndexStore) -> Bool {
         result.store === store && result.storeVersion == store.version && result.query.raw == query.raw && result.query.folderScope == query.folderScope &&
-        result.query.hiddenOnly == query.hiddenOnly &&
+        result.query.hiddenOnly == query.hiddenOnly && result.query.fuzzyNames == query.fuzzyNames &&
         result.options.kind == options.kind && result.options.pinyin == options.pinyin &&
         result.options.sortsRecentResults == options.sortsRecentResults && result.options.sort == options.sort && result.options.ascending == options.ascending
     }
