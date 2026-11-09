@@ -37,6 +37,38 @@ final class SearchAccessoryTests: XCTestCase {
         XCTAssertEqual((stash.documentView as? NSTableView)?.numberOfRows, 1)
     }
 
+    func testQuickFilterRestoresSavedFilenameModeAndReadsLegacyFilters() throws {
+        let app = NSApplication.shared
+        let suite = "OilFindQuickFilterMode-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        QuickFilter.save([
+            .init(name: "Approximate", query: "rdm", kind: nil, folder: nil, volume: nil, hiddenOnly: false, fuzzyNames: true),
+            .init(name: "Legacy", query: "readme", kind: nil, folder: nil, volume: nil, hiddenOnly: false)
+        ], to: preferences)
+
+        let controller = SearchViewController(snapshot: false, preferences: preferences)
+        _ = controller.view
+        func restore(_ title: String) throws {
+            let menu = try XCTUnwrap(controller.filters.scopeMenu?())
+            let quick = try XCTUnwrap(menu.items.first { $0.title == L10n.text("quickFilter.title") }?.submenu)
+            let item = try XCTUnwrap(quick.items.first { $0.title == title })
+            XCTAssertTrue(app.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
+        }
+        func fuzzyMenuState() throws -> NSControl.StateValue {
+            let menu = try XCTUnwrap(controller.filters.scopeMenu?())
+            return try XCTUnwrap(menu.items.first { $0.title == L10n.text("scope.fuzzyNames") }).state
+        }
+
+        try restore("Approximate")
+        XCTAssertEqual(controller.searchField.text, "rdm")
+        XCTAssertEqual(try fuzzyMenuState(), .on)
+        XCTAssertFalse(preferences.bool(forKey: "fuzzyNames"))
+        try restore("Legacy")
+        XCTAssertEqual(controller.searchField.text, "readme")
+        XCTAssertEqual(try fuzzyMenuState(), .off)
+    }
+
     func testApplyingQuickFilterPreservesQueryAndDisplaysRemovableScopes() throws {
         let app = NSApplication.shared
         let suite = "OilFindAccessory-" + UUID().uuidString
