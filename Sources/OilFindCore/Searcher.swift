@@ -1,7 +1,7 @@
 import Foundation
 import COilFind
 
-public enum SortKey { case relevance, name, modified, size }
+public enum SortKey: String { case relevance, name, modified, size }
 public struct SearchOptions {
     public var sort: SortKey = .relevance
     public var ascending: Bool = false

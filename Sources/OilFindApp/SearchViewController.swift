@@ -390,6 +390,13 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         hiddenOnly = filter.hiddenOnly
         fuzzyNames = filter.fuzzyNames ?? false
         filters.select(Int(filter.kind ?? 0), notify: false)
+        if let sort = filter.sort, let key = SortKey(rawValue: sort.key) {
+            var options = filters.options
+            options.sortsRecentResults = sortingRecent
+            options.sort = sortingRecent && key == .relevance ? .modified : key
+            options.ascending = options.sort == key && sort.ascending
+            filters.options = options
+        }
         scopeChanged()
         return true
     }
@@ -421,7 +428,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             guard !title.isEmpty else { return }
             let filter = QuickFilter(name: title, query: self.searchField.text, kind: self.filters.options.kind,
                                      folder: self.folderScope, volume: self.volumeScope, hiddenOnly: self.hiddenOnly,
-                                     fuzzyNames: self.fuzzyNames && !self.filters.additionalSelected)
+                                     fuzzyNames: self.fuzzyNames && !self.filters.additionalSelected,
+                                     sort: .init(key: self.filters.options.sort.rawValue, ascending: self.filters.options.ascending))
             var saved = QuickFilter.load(from: self.preferences)
             if let index = saved.firstIndex(where: { $0.name.caseInsensitiveCompare(title) == .orderedSame }) { saved[index] = filter }
             else { saved.append(filter) }
