@@ -35,11 +35,6 @@ final class SearchAccessoryBar: FlippedView {
         stashControls.append(button(L10n.text("panel.openStashWindow"), action: open))
     }
 
-    func configureDroplrShare(available: @escaping () -> Bool, share: @escaping ([URL]) -> Void) {
-        stashTable.canShareWithDroplr = available
-        stashTable.onShareWithDroplr = share
-    }
-
     func revealAddedStashFiles(_ count: Int) {
         stashTable.revealAddedFiles(count)
     }
