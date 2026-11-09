@@ -172,7 +172,9 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
     const id = ++request.current;
     setLoading(true);
     const filter = filterID === allFilter ? undefined : filterID;
-    const search = { type: "search" as const, query, filter, limit: resultLimit, content: preferences.searchContents };
+    // Text in square brackets always asks for content matches, like in Oil Find.
+    const content = preferences.searchContents || /\[[^\]]+\]/.test(query);
+    const search = { type: "search" as const, query, filter, limit: resultLimit, content };
     const timer = setTimeout(() => bridge.current?.send(id, search), 60);
     return () => clearTimeout(timer);
   }, [query, filterID, retry]);
@@ -372,7 +374,7 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
       filtering={false}
       isLoading={loading}
       isShowingDetail={showingDetail && visible.length + visibleContent.length > 0}
-      searchBarPlaceholder="Search with Oil Find… (*.pdf, in:~/Documents, dm:week, size:>10mb)"
+      searchBarPlaceholder="Search with Oil Find… (*.pdf, invoice [client], in:~/Documents, dm:week)"
       searchBarAccessory={filterDropdown}
     >
       {issue ? (

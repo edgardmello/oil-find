@@ -488,6 +488,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                 let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? UInt64) ?? 0
                 if size > 0 && size <= 512 * 1024,
                    let category = ContentExtractor.fileCategory(name: (path as NSString).lastPathComponent, kind: ext == "pdf" ? 3 : 7, size: size),
+                   category != .image,
                    let extracted = ContentExtractor.extractText(at: path, category: category),
                    ContentExtractor.matches(body: extracted, clauses: [flatTerms], excluded: []) {
                     if let self {
@@ -749,7 +750,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                 let kind = store.kind[rawID]
                 if let requiredKind, kind != requiredKind { continue }
                 // Fast pre-filter by kind: 3 (doc), 7 (code), or 0 (other text files).
-                if kind != 3 && kind != 7 && kind != 0 { continue }
+                if kind != 3 && kind != 4 && kind != 7 && kind != 0 { continue }
                 if store.sizeC[rawID] == 0 { continue }
 
                 let id = UInt32(rawID)
@@ -783,6 +784,8 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                 let name = store.name(id)
                 let kind = store.kind[Int(id)]
                 guard let category = ContentExtractor.fileCategory(name: name, kind: kind, size: size) else { continue }
+                // Image analysis is too slow for the search deadline; background indexing covers images.
+                if category == .image { continue }
                 if category.isDocument && !allowDocs { continue }
                 if !category.isDocument && !allowCode { continue }
                 results.append(
@@ -991,7 +994,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                             if flags & (SiftFlag.noise | SiftFlag.inPackage | SiftFlag.hidden) != 0 { continue }
                         }
                         let kind = store.kind[rawID]
-                        if kind != 3 && kind != 7 && kind != 0 { continue }
+                        if kind != 3 && kind != 4 && kind != 7 && kind != 0 { continue }
                         let id = UInt32(rawID)
                         let size = store.size(id)
                         guard size > 0 else { continue }

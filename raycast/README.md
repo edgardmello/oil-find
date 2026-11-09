@@ -4,7 +4,7 @@ Search the Oil Find index from Raycast. The extension talks to the Oil Find app 
 
 ## What it does
 
-- **Content matches**: when Oil Find's content search is on, files whose text matches appear in their own section under the filename results, with the matching line. Turn it off with the Contents preference.
+- **Content matches**: when Oil Find's content search is on, files whose text matches appear in their own section under the filename results, with the matching line. Put text in square brackets to search only inside files: `invoice [client]`, `.pdf [paid|overdue]`, or `.jpg [dog]` for photos and screenshots (Oil Find labels images with Apple's Vision framework, in English, and reads the text in them). Brackets always search contents; otherwise the Contents preference decides.
 - **Filter menu** next to the search bar: file kinds, every quick filter, folder filter and saved filter from Oil Find under the same names, and each external drive Oil Find knows. A disconnected drive is searched through its saved catalog; its results are marked Offline.
 - **Details panel** (⌘I): image, text and folder previews with size, dates and kind.
 - **Actions**, close to the Cling extension: Open, Show in Finder, Open With (⌘O), Quick Look (⌘Y), Copy Path, Name or File, Paste Path in the frontmost app, Open Folder in Terminal (⌘T), Open in Editor (⌘E, once an editor is set), Move to Trash (⌃X).

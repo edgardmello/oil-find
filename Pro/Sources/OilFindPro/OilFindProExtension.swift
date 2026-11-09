@@ -166,9 +166,9 @@ private struct ContentSearchSettingsSection: View {
                 )
                 Text(
                     tr(
-                        zh: "在文件名搜索的同时，实时检索代码、文本、PDF 与文档内部正文，全部在本机完成。",
-                        pt: "Pesquisa dentro de códigos, textos, Markdown, PDFs e documentos Office localmente em paralelo à busca por nome.",
-                        en: "Searches inside code, plain text, Markdown, PDFs and Office documents locally alongside filename search."
+                        zh: "在文件名搜索的同时，实时检索代码、文本、PDF、文档与图片里的内容，全部在本机完成。",
+                        pt: "Pesquisa dentro de códigos, textos, Markdown, PDFs, documentos Office e imagens localmente em paralelo à busca por nome.",
+                        en: "Searches inside code, plain text, Markdown, PDFs, Office documents and images locally alongside filename search."
                     )
                 )
                 .font(.footnote)
@@ -188,9 +188,9 @@ private struct ContentSearchSettingsSection: View {
 
             Toggle(
                 tr(
-                    zh: "PDF、Office 与富文本文档 (.pdf, .docx, .pptx, .xlsx, .rtf…)",
-                    pt: "Documentos PDF, Office e RTF (.pdf, .docx, .pptx, .xlsx, .rtf…)",
-                    en: "PDF, Office and Rich Text documents (.pdf, .docx, .pptx, .xlsx, .rtf…)"
+                    zh: "PDF、Office、富文本文档与图片 (.pdf, .docx, .rtf, .jpg, .png…)",
+                    pt: "Documentos PDF, Office, RTF e imagens (.pdf, .docx, .rtf, .jpg, .png…)",
+                    en: "PDF, Office and Rich Text documents, and images (.pdf, .docx, .rtf, .jpg, .png…)"
                 ),
                 isOn: Binding(get: { manager.documentsEnabled }, set: manager.setDocumentsEnabled)
             )

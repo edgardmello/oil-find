@@ -5,8 +5,8 @@ type Input = {
   /**
    * An Oil Find query. Plain words match file and folder names. Operators: `*.pdf` or `ext:pdf;docx`,
    * `kind:folder|app|doc|image|video|audio|code|archive`, `in:~/Documents` (inside a folder), `path:part/of/path`,
-   * `dm:today|yesterday|week|lastweek|month|lastmonth|year|2026-11-03` (modified), `size:>10mb`, `content:"exact phrase"`
-   * (inside files), `tag:Red`, `regex:^IMG_\d+`. Words are combined with AND, `|` means OR, a leading `!` excludes.
+   * `dm:today|yesterday|week|lastweek|month|lastmonth|year|2026-11-03` (modified), `size:>10mb`, `[client]` or `content:"exact phrase"`
+   * (inside files, for example `invoice [client]` or `.jpg [dog]`), `tag:Red`, `regex:^IMG_\d+`. Words are combined with AND, `|` means OR, a leading `!` excludes.
    * Use an empty string for the most recently modified files.
    */
   query: string;

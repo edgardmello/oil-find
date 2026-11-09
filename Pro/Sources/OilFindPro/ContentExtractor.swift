@@ -2,6 +2,7 @@ import Foundation
 import PDFKit
 import AppKit
 import Compression
+import Vision
 
 public struct ContentTerm: Equatable {
     public let text: String
@@ -44,6 +45,13 @@ public enum ContentExtractor {
         "rtf", "rtfd"
     ]
 
+    private static let imageExtensions: Set<String> = [
+        "jpg", "jpeg", "png", "heic", "heif", "tif", "tiff", "gif", "webp", "bmp"
+    ]
+    public static let maxImageFileSize: UInt64 = 40 * 1024 * 1024
+    /// Labels below this confidence are mostly noise ("structure", "material").
+    private static let minimumLabelConfidence: Float = 0.35
+
     public static func fileCategory(name: String, kind: UInt8, size: UInt64) -> FileCategory? {
         guard size > 0 else { return nil }
         let lower = name.lowercased()
@@ -63,6 +71,9 @@ public enum ContentExtractor {
         if richTextExtensions.contains(ext) {
             return size <= maxDocumentFileSize ? .richText : nil
         }
+        if imageExtensions.contains(ext) {
+            return size <= maxImageFileSize ? .image : nil
+        }
         if kind == 7 || textExtensions.contains(ext) || extensionlessTextNames.contains(lower) {
             return size <= maxTextFileSize ? .plainText : nil
         }
@@ -74,11 +85,13 @@ public enum ContentExtractor {
         case pdf
         case officeXML
         case richText
+        /// Photos and screenshots: recognized text plus the objects Vision sees, such as "dog" or "beach".
+        case image
 
         public var isDocument: Bool {
             switch self {
             case .plainText: return false
-            case .pdf, .officeXML, .richText: return true
+            case .pdf, .officeXML, .richText, .image: return true
             }
         }
     }
@@ -95,6 +108,8 @@ public enum ContentExtractor {
             raw = extractOfficeXMLText(url: url)
         case .richText:
             raw = extractRichText(url: url)
+        case .image:
+            raw = extractImageText(url: url)
         }
         guard let text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             return nil
@@ -138,6 +153,28 @@ public enum ContentExtractor {
             if output.utf8.count >= maxStoredTextLength { break }
         }
         return output.isEmpty ? nil : output
+    }
+
+    /// One line of object labels, then any text in the image, so `[dog]` and `[invoice total]` both match.
+    static func extractImageText(url: URL) -> String? {
+        // Reading an iCloud placeholder would download the whole photo just to label it.
+        var info = stat()
+        guard lstat(url.path, &info) == 0, info.st_flags & UInt32(SF_DATALESS) == 0 else { return nil }
+        let classify = VNClassifyImageRequest()
+        let recognize = VNRecognizeTextRequest()
+        recognize.recognitionLevel = .accurate
+        recognize.usesLanguageCorrection = true
+        recognize.automaticallyDetectsLanguage = true
+        let handler = VNImageRequestHandler(url: url, options: [:])
+        do { try handler.perform([classify, recognize]) } catch { return nil }
+
+        let labels = (classify.results ?? [])
+            .filter { $0.confidence >= minimumLabelConfidence }
+            .prefix(20)
+            .map { $0.identifier.replacingOccurrences(of: "_", with: " ") }
+        let lines = (recognize.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+        let parts = [labels.joined(separator: ", "), lines.joined(separator: "\n")].filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 
     private static func extractRichText(url: URL) -> String? {

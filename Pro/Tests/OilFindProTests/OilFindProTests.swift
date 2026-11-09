@@ -78,6 +78,33 @@ final class OilFindProTests: XCTestCase {
         XCTAssertTrue(work3().isEmpty)
     }
 
+    func testImagesAreIndexedByRecognizedTextAndLabels() throws {
+        XCTAssertEqual(ContentExtractor.fileCategory(name: "Holiday.JPG", kind: 4, size: 1_000), .image)
+        XCTAssertNil(ContentExtractor.fileCategory(name: "huge.png", kind: 4, size: ContentExtractor.maxImageFileSize + 1))
+        XCTAssertTrue(ContentExtractor.FileCategory.image.isDocument)
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("receipt.png")
+        let size = NSSize(width: 900, height: 300)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width), pixelsHigh: Int(size.height),
+                                                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                                    colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        NSColor.white.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        ("PAID INVOICE 4821" as NSString).draw(at: NSPoint(x: 40, y: 110),
+                                               withAttributes: [.font: NSFont.systemFont(ofSize: 72, weight: .bold), .foregroundColor: NSColor.black])
+        NSGraphicsContext.restoreGraphicsState()
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
+
+        let body = try XCTUnwrap(ContentExtractor.extractText(at: url.path, category: .image))
+        XCTAssertTrue(body.localizedCaseInsensitiveContains("invoice 4821"), body)
+        XCTAssertTrue(ContentExtractor.matches(body: body, clauses: [[ContentTerm(text: "paid invoice", caseSensitive: false)]], excluded: []))
+    }
+
     func testExtensionProvidesSupplementaryProvider() {
         let ext = OilFindProExtension()
         defer { ext.stop() }
