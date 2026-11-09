@@ -277,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             if let link = SearchLink(url) { pendingSearchLink = link }
+            else if let link = StashLink(url) { if !secondaryInstance { panel.searchController.applyStashLink(link) } }
             else { appExtension?.handle(url) }
         }
         showPendingSearchLink()

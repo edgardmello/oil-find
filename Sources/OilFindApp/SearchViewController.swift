@@ -1771,6 +1771,24 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         })
     }
 
+    func applyStashLink(_ link: StashLink) {
+        guard !snapshot else { return }
+        _ = view
+        switch link.action {
+        case .add(let paths):
+            fileStash.add(paths.map { URL(fileURLWithPath: $0) }) { [weak self] _ in self?.refreshAccessories() }
+        case .remove(let paths):
+            let removed = Set(paths)
+            fileStash.remove(Set(fileStash.files.filter { removed.contains($0.path) }.map(\.id)))
+            refreshAccessories()
+        case .clear:
+            fileStash.clear()
+            refreshAccessories()
+        case .show:
+            showStash()
+        }
+    }
+
     func toggleStashWindow() {
         if stashWindow.window?.isVisible == true { stashWindow.close() }
         else { showStash() }

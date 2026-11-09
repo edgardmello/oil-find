@@ -32,3 +32,31 @@ struct SearchLink {
         filterID = value("library").flatMap { $0.isEmpty ? nil : $0 }
     }
 }
+
+/// `oilfind://stash?add=/path&add=/other`, `?remove=/path`, `?clear=1` or `?show=1`, used by the Raycast extension
+/// so the running app stays the only writer of the stash.
+struct StashLink: Equatable {
+    enum Action: Equatable {
+        case add([String]), remove([String]), clear, show
+    }
+
+    let action: Action
+
+    init?(_ url: URL) {
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              parts.scheme?.lowercased() == "oilfind", parts.host?.lowercased() == "stash",
+              parts.path.isEmpty || parts.path == "/", parts.user == nil, parts.password == nil, parts.port == nil,
+              let items = parts.queryItems, let name = items.first?.name,
+              items.allSatisfy({ $0.name == name }) else { return nil }
+        let paths = items.compactMap(\.value)
+        switch name {
+        case "add", "remove":
+            guard !paths.isEmpty, paths.count == items.count,
+                  paths.allSatisfy({ $0.hasPrefix("/") && !$0.contains("\0") }) else { return nil }
+            action = name == "add" ? .add(paths) : .remove(paths)
+        case "clear" where items.count == 1: action = .clear
+        case "show" where items.count == 1: action = .show
+        default: return nil
+        }
+    }
+}

@@ -15,7 +15,7 @@ import {
 } from "@raycast/api";
 import { basename, dirname } from "node:path";
 import { useEffect, useRef, useState } from "react";
-import { BridgeResponse, SearchFilter, SearchItem, findApplication, startBridge } from "./bridge";
+import { BridgeResponse, SearchFilter, SearchItem, findApplication, startBridge, updateStash } from "./bridge";
 import { displayPath, folderQuery } from "./paths";
 import { ItemDetail, formatDate, formatSize } from "./preview";
 
@@ -24,6 +24,7 @@ interface Preferences {
   terminalApp?: Application;
   editorApp?: Application;
   showDetail: boolean;
+  searchContents: boolean;
 }
 
 interface LaunchContext {
@@ -102,6 +103,8 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
   const [filterID, setFilterID] = useState(props.launchContext?.filter ?? allFilter);
   const [filters, setFilters] = useState<SearchFilter[]>([]);
   const [items, setItems] = useState<SearchItem[]>([]);
+  const [contentItems, setContentItems] = useState<SearchItem[]>([]);
+  const [contentLoading, setContentLoading] = useState(false);
   const [total, setTotal] = useState(0);
   const [issue, setIssue] = useState<string>();
   const [loading, setLoading] = useState(true);
@@ -132,7 +135,14 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
           return;
         }
         if (response.id !== request.current) return;
+        if (response.contentItems) {
+          setContentItems(response.contentItems);
+          setContentLoading(false);
+          return;
+        }
         setLoading(false);
+        setContentItems([]);
+        setContentLoading(response.contentPending === true);
         setIssue(response.error && describeError(response.error));
         setItems(response.items ?? []);
         setTotal(response.total ?? 0);
@@ -155,12 +165,14 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
     const id = ++request.current;
     setLoading(true);
     const filter = filterID === allFilter ? undefined : filterID;
-    const timer = setTimeout(() => bridge.current?.send(id, { type: "search", query, filter, limit: resultLimit }), 60);
+    const search = { type: "search" as const, query, filter, limit: resultLimit, content: preferences.searchContents };
+    const timer = setTimeout(() => bridge.current?.send(id, search), 60);
     return () => clearTimeout(timer);
   }, [query, filterID, retry]);
 
   const activeFilter = filters.find((filter) => filter.id === filterID);
   const visible = items.filter((item) => !removed.has(item.path));
+  const visibleContent = contentItems.filter((item) => !removed.has(item.path));
   const trimmed = query.trim();
   const oilFind = (
     <Action
@@ -181,6 +193,16 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
       }}
     />
   );
+
+  async function stash(item: SearchItem) {
+    if (!application.current) return;
+    try {
+      await updateStash(application.current, "add", [item.path]);
+      await showToast({ style: Toast.Style.Success, title: "Added to Oil Find Stash", message: basename(item.path) });
+    } catch {
+      await showToast({ style: Toast.Style.Failure, title: "Could not reach Oil Find" });
+    }
+  }
 
   function searchIn(folder: string) {
     setQuery(folderQuery(folder));
@@ -212,6 +234,12 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
             icon={Icon.MagnifyingGlass}
             shortcut={{ modifiers: ["cmd"], key: "f" }}
             onAction={() => searchIn(folder)}
+          />
+          <Action
+            title="Add to Oil Find Stash"
+            icon={Icon.Tray}
+            shortcut={{ modifiers: ["cmd"], key: "s" }}
+            onAction={() => stash(item)}
           />
           {quicklinkAction}
         </ActionPanel.Section>
@@ -281,6 +309,28 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
     </List.Dropdown>
   );
 
+  function renderItem(item: SearchItem) {
+    return (
+      <List.Item
+        key={item.path}
+        title={basename(item.path) || item.path}
+        subtitle={showingDetail ? undefined : (item.snippet ?? displayPath(item.path))}
+        icon={{ fileIcon: item.path }}
+        quickLook={{ path: item.path, name: basename(item.path) }}
+        accessories={
+          showingDetail
+            ? undefined
+            : [
+                ...(item.isFolder ? [] : [{ text: formatSize(item.size) }]),
+                { date: new Date(item.modified * 1000), tooltip: `Modified ${formatDate(item.modified)}` },
+              ]
+        }
+        detail={showingDetail ? <ItemDetail item={item} /> : undefined}
+        actions={itemActions(item)}
+      />
+    );
+  }
+
   const countLabel = total > visible.length ? `${visible.length} of ${total.toLocaleString()}` : String(visible.length);
 
   return (
@@ -289,7 +339,7 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
       onSearchTextChange={setQuery}
       filtering={false}
       isLoading={loading}
-      isShowingDetail={showingDetail && visible.length > 0}
+      isShowingDetail={showingDetail && visible.length + visibleContent.length > 0}
       searchBarPlaceholder="Search with Oil Find… (*.pdf, in:~/Documents, dm:week, size:>10mb)"
       searchBarAccessory={filterDropdown}
     >
@@ -321,25 +371,15 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
       )}
       {!issue && visible.length > 0 && (
         <List.Section title={trimmed || activeFilter ? "Results" : "Recent Files"} subtitle={countLabel}>
-          {visible.map((item) => (
-            <List.Item
-              key={item.path}
-              title={basename(item.path) || item.path}
-              subtitle={showingDetail ? undefined : displayPath(item.path)}
-              icon={{ fileIcon: item.path }}
-              quickLook={{ path: item.path, name: basename(item.path) }}
-              accessories={
-                showingDetail
-                  ? undefined
-                  : [
-                      ...(item.isFolder ? [] : [{ text: formatSize(item.size) }]),
-                      { date: new Date(item.modified * 1000), tooltip: `Modified ${formatDate(item.modified)}` },
-                    ]
-              }
-              detail={showingDetail ? <ItemDetail item={item} /> : undefined}
-              actions={itemActions(item)}
-            />
-          ))}
+          {visible.map((item) => renderItem(item))}
+        </List.Section>
+      )}
+      {!issue && (visibleContent.length > 0 || contentLoading) && (
+        <List.Section
+          title="Content Matches"
+          subtitle={contentLoading ? "Searching contents…" : String(visibleContent.length)}
+        >
+          {visibleContent.map((item) => renderItem(item))}
         </List.Section>
       )}
     </List>

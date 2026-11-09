@@ -19,6 +19,13 @@
       "subtitle": "Oil Find",
       "description": "Search files and folders in the Oil Find index. Supports Oil Find syntax such as *.pdf, in:~/Documents, dm:week and size:>10mb, plus the filters from your Oil Find library.",
       "mode": "view"
+    },
+    {
+      "name": "stash",
+      "title": "Oil Find Stash",
+      "subtitle": "Oil Find",
+      "description": "See the files kept in the Oil Find stash, copy them all at once, open them or remove them.",
+      "mode": "view"
     }
   ],
   "preferences": [
@@ -27,6 +34,15 @@
       "type": "textfield",
       "title": "Oil Find App Path",
       "description": "Absolute path to Oil Find.app or a development build. Leave blank to use the app in Applications.",
+      "required": false
+    },
+    {
+      "name": "searchContents",
+      "type": "checkbox",
+      "title": "Contents",
+      "label": "Also search inside files",
+      "description": "Shows matches from Oil Find's content index under the filename results. Follows the content search settings in Oil Find.",
+      "default": true,
       "required": false
     },
     {

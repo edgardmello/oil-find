@@ -92,7 +92,7 @@ export function ItemDetail({ item }: { item: SearchItem }) {
   const birth = created(item.path);
   return (
     <List.Item.Detail
-      markdown={markdown(item)}
+      markdown={(item.snippet ? `> ${item.snippet.replace(/\n/g, " ")}\n\n` : "") + markdown(item)}
       metadata={
         <List.Item.Detail.Metadata>
           <List.Item.Detail.Metadata.Label title="Name" text={basename(item.path)} />

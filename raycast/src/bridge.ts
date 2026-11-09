@@ -1,11 +1,11 @@
-import { spawn, spawnSync } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 // Must match OilFindRaycastProtocol in the app's Info.plist.
-const protocolVersion = "2";
+const protocolVersion = "3";
 
 export interface SearchItem {
   path: string;
@@ -13,6 +13,10 @@ export interface SearchItem {
   isFolder: boolean;
   size: number;
   modified: number;
+  /** Matching text for a content match. */
+  snippet?: string;
+  /** Set for stashed files that no longer exist. */
+  missing?: boolean;
 }
 
 export interface SearchFilter {
@@ -28,6 +32,11 @@ export interface BridgeResponse {
   items?: SearchItem[];
   total?: number;
   filters?: SearchFilter[];
+  /** A second line with content matches for the same id follows this one. */
+  contentPending?: boolean;
+  contentItems?: SearchItem[];
+  stash?: SearchItem[];
+  copied?: number;
   error?: string;
 }
 
@@ -77,7 +86,25 @@ export function findApplication(applicationPath: string | undefined): OilFindApp
   );
 }
 
-type Request = { type: "search"; query: string; filter?: string; limit: number } | { type: "filters" };
+type Request =
+  | { type: "search"; query: string; filter?: string; limit: number; content: boolean }
+  | { type: "filters" }
+  | { type: "stash" }
+  | { type: "copyFiles"; paths: string[] };
+
+/** Asks the running Oil Find to change its stash, without bringing it to the front. */
+export function updateStash(application: string, action: "add" | "remove", paths: string[]): Promise<void>;
+export function updateStash(application: string, action: "clear" | "show"): Promise<void>;
+export function updateStash(application: string, action: "add" | "remove" | "clear" | "show", paths: string[] = []) {
+  const parameters = new URLSearchParams();
+  if (action === "add" || action === "remove") paths.forEach((path) => parameters.append(action, path));
+  else parameters.set(action, "1");
+  const url = "oilfind://stash?" + parameters.toString().replace(/\+/g, "%20");
+  const background = action === "show" ? [] : ["-g"];
+  return new Promise<void>((resolve, reject) => {
+    execFile("/usr/bin/open", [...background, "-a", application, url], (error) => (error ? reject(error) : resolve()));
+  });
+}
 
 export function startBridge(
   executable: string,
@@ -118,14 +145,19 @@ export function startBridge(
   }
 
   output.on("line", (line) => {
-    clearTimeout(timeout);
-    busy = false;
+    let response: BridgeResponse;
     try {
-      onResponse(JSON.parse(line) as BridgeResponse);
+      response = JSON.parse(line) as BridgeResponse;
     } catch {
       fail("Oil Find returned an unexpected response. Update Oil Find and retry.");
       return;
     }
+    // Content matches trail their search answer; the next request may already be on its way.
+    if (!response.contentItems) {
+      clearTimeout(timeout);
+      busy = false;
+    }
+    onResponse(response);
     flush();
   });
   child.on("error", () => fail("Could not start Oil Find. Check Oil Find App Path and retry."));
