@@ -1,6 +1,11 @@
 import Foundation
 
 struct QuickFilter: Codable {
+    struct Sort: Codable {
+        let key: String
+        let ascending: Bool
+    }
+
     let name: String
     let query: String
     let kind: UInt8?
@@ -8,6 +13,7 @@ struct QuickFilter: Codable {
     let volume: String?
     let hiddenOnly: Bool
     var fuzzyNames: Bool? = nil
+    var sort: Sort? = nil
 
     private static let key = "savedQuickFilters"
 

@@ -37,13 +37,14 @@ final class SearchAccessoryTests: XCTestCase {
         XCTAssertEqual((stash.documentView as? NSTableView)?.numberOfRows, 1)
     }
 
-    func testQuickFilterRestoresSavedFilenameModeAndReadsLegacyFilters() throws {
+    func testQuickFilterRestoresSavedFilenameModeAndSortAndReadsLegacyFilters() throws {
         let app = NSApplication.shared
         let suite = "OilFindQuickFilterMode-" + UUID().uuidString
         let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { preferences.removePersistentDomain(forName: suite) }
         QuickFilter.save([
-            .init(name: "Approximate", query: "rdm", kind: nil, folder: nil, volume: nil, hiddenOnly: false, fuzzyNames: true),
+            .init(name: "Approximate", query: "rdm", kind: nil, folder: nil, volume: nil, hiddenOnly: false, fuzzyNames: true,
+                  sort: .init(key: "size", ascending: true)),
             .init(name: "Legacy", query: "readme", kind: nil, folder: nil, volume: nil, hiddenOnly: false)
         ], to: preferences)
 
@@ -63,6 +64,9 @@ final class SearchAccessoryTests: XCTestCase {
         try restore("Approximate")
         XCTAssertEqual(controller.searchField.text, "rdm")
         XCTAssertEqual(try fuzzyMenuState(), .on)
+        XCTAssertEqual(controller.filters.options.sort, .size)
+        XCTAssertTrue(controller.filters.options.ascending)
+        XCTAssertNil(preferences.string(forKey: "sortKey"))
         XCTAssertFalse(preferences.bool(forKey: "fuzzyNames"))
         try restore("Legacy")
         XCTAssertEqual(controller.searchField.text, "readme")
