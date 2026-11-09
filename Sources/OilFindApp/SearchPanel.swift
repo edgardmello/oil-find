@@ -94,10 +94,15 @@ final class SearchPanel: NSPanel {
     func toggle(source: PanelSource = .hotkey) {
         if isVisible && isKeyWindow && !hiding { hide(source: source) } else { show(source: source) }
     }
-    func resizeForInlinePreview(usePointerScreen: Bool = false, display: Bool = true) {
-        let target = usePointerScreen
-            ? NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
-            : screen
+    func resizeForInlinePreview(usePreferredDisplay: Bool = false, display: Bool = true) {
+        let target: NSScreen?
+        if usePreferredDisplay {
+            target = searchController.opensOnPointerDisplay
+                ? NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
+                : NSScreen.screens.first
+        } else {
+            target = screen
+        }
         guard let screen = target ?? NSScreen.main else { return }
         let visible = screen.visibleFrame
         let width = min(searchController.inlinePreviewVisible ? 1160 : 800, visible.width - 80)
@@ -112,7 +117,7 @@ final class SearchPanel: NSPanel {
         if cold || hiding || !isKeyWindow { searchController.captureFilePasteDestination() }
         if cold || hiding {
             searchController.preparePanelAppearance()
-            resizeForInlinePreview(usePointerScreen: cold, display: false)
+            resizeForInlinePreview(usePreferredDisplay: cold, display: false)
         }
         AppLog.logger.info("panel show source=\(source.rawValue, privacy: .public)")
         animationGeneration += 1; hiding = false; fade?.stop()

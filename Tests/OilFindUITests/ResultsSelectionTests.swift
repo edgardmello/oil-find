@@ -33,6 +33,32 @@ final class ResultsSelectionTests: XCTestCase {
         XCTAssertEqual(results.selectedItems.map(\.path), paths)
     }
 
+    func testOpenWithRowFollowsResultsLayout() throws {
+        let app = NSApplication.shared
+        let suite = "OilFindOpenWith-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data().write(to: root.appendingPathComponent("report.txt"))
+        let config = IndexConfig(rootPath: root.path)
+        let store = IndexStore(scan: try XCTUnwrap(Scanner(config: config, threads: 1).run()), config: config)
+        let controller = SearchViewController(snapshot: false, preferences: preferences)
+        controller.additionalSources = { [SearchSource(id: "startup", displayName: "", isOnline: true, store: store)] }
+        try controller.prepareSnapshot(state: "results", query: "report", options: .init(), store: store, selection: 0)
+        let footer = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? FooterBar }.first)
+        let menu = try XCTUnwrap(controller.filters.viewMenu?())
+        let compact = try XCTUnwrap(menu.items.first { $0.title == L10n.text("view.compact") })
+
+        XCTAssertEqual(footer.desiredHeight, 34)
+        XCTAssertTrue(app.sendAction(try XCTUnwrap(compact.action), to: compact.target, from: compact))
+        XCTAssertEqual(footer.desiredHeight, 62)
+        preferences.set(false, forKey: "compactResults")
+        controller.applySearchSetting("compactResults")
+        XCTAssertEqual(footer.desiredHeight, 34)
+    }
+
     func testCategoryMotionSurvivesSearchRefreshAndLayout() throws {
         _ = NSApplication.shared
         if Theme.Motion.reduced { throw XCTSkip("Category motion respects Reduce Motion") }

@@ -363,8 +363,13 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     @objc private func selectResultsView(_ item: NSMenuItem) {
         let compact = item.tag == 1
-        results.setCompact(compact)
         if !snapshot { preferences.set(compact, forKey: "compactResults") }
+        setResultsLayout(compact: compact)
+    }
+
+    private func setResultsLayout(compact: Bool) {
+        results.setCompact(compact)
+        refreshApplicationSuggestions()
     }
 
     private func makeQuickFilterMenu() -> NSMenu {
@@ -585,7 +590,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         guard isViewLoaded else { return }
         switch key {
         case "compactResults":
-            results.setCompact(preferences.bool(forKey: key))
+            setResultsLayout(compact: preferences.bool(forKey: key))
         case "fuzzyNames":
             fuzzyNames = preferences.bool(forKey: key)
             scopeChanged()
@@ -596,6 +601,10 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         default:
             break
         }
+    }
+
+    var opensOnPointerDisplay: Bool {
+        preferences.object(forKey: "openOnPointerDisplay") as? Bool ?? true
     }
 
     func preparePanelAppearance() {
@@ -1476,7 +1485,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         footer.text = L10n.text("scope.exclusionSaved")
     }
     private func refreshApplicationSuggestions() {
-        guard !snapshot, !syntaxVisible, stateView == nil, results.selectionCount == 1,
+        guard !snapshot, results.compact, preferences.object(forKey: "showOpenWithRow") as? Bool ?? true,
+              !syntaxVisible, stateView == nil, results.selectionCount == 1,
               let item = selectedOnlineItems.first, item.flags & SiftFlag.dir == 0 else {
             requestApplicationSuggestions(for: nil)
             return
@@ -1485,7 +1495,6 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     private func requestApplicationSuggestions(for file: URL?) {
-        let file = (preferences.object(forKey: "showOpenWithRow") as? Bool ?? true) ? file : nil
         guard file != applicationSuggestionsFile else { return }
         applicationSuggestionsWork?.cancel()
         applicationSuggestionsFile = file
@@ -1557,6 +1566,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     func menuWillOpen(_ menu: NSMenu) { menuTracking = true }
     func menuDidClose(_ menu: NSMenu) { menuTracking = false; hideIfInactive() }
     private func hideIfInactive() {
+        guard !preferences.bool(forKey: "keepPanelOpenOnDefocus") else { return }
         if CFAbsoluteTimeGetCurrent() - quickLookDismissTime < 0.4 { return }
         if view.window?.isKeyWindow == false && !quickLook.isVisible && !menuTracking && !dragging { hidePanel?() }
     }
