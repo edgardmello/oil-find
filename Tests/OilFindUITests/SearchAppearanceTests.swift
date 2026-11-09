@@ -55,6 +55,27 @@ final class SearchAppearanceTests: XCTestCase {
         XCTAssertEqual(controller.searchField.text, "report")
     }
 
+    func testClassicRestoresOriginalLayoutWithoutOverwritingTablePreference() throws {
+        _ = NSApplication.shared
+        let suite = "OilFindClassic-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        preferences.set(SearchInterface.classic.rawValue, forKey: SearchInterface.key)
+        preferences.set(true, forKey: "compactResults")
+        let controller = SearchViewController(snapshot: false, preferences: preferences)
+        _ = controller.view
+
+        XCTAssertEqual(controller.searchInterface, .classic)
+        XCTAssertEqual(controller.filters.preferredHeight, 40)
+        XCTAssertFalse(controller.results.compact)
+        XCTAssertTrue(preferences.bool(forKey: "compactResults"))
+
+        preferences.set(SearchInterface.window.rawValue, forKey: SearchInterface.key)
+        controller.applySearchSetting(SearchInterface.key)
+        XCTAssertTrue(controller.results.compact)
+        XCTAssertEqual(controller.filters.preferredHeight, FilterBar.toolbarHeight)
+    }
+
     func testStatusVisibilityIsIndependentForWindowAndSearchBar() throws {
         _ = NSApplication.shared
         let suite = "OilFindStatus-" + UUID().uuidString

@@ -395,8 +395,15 @@ private struct SettingsForm: View {
                         .font(.caption)
                         .padding(7)
                         .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
-                        if mode == .window {
-                            ForEach(0..<4) { row in
+                        if mode != .bar {
+                            if mode == .classic {
+                                HStack(spacing: 5) {
+                                    ForEach(0..<5) { _ in
+                                        Capsule().fill(.secondary.opacity(0.35)).frame(width: 12, height: 3)
+                                    }
+                                }
+                            }
+                            ForEach(0..<(mode == .classic ? 3 : 4)) { row in
                                 HStack(spacing: 8) {
                                     Image(systemName: row == 0 ? "folder.fill" : "doc")
                                         .foregroundStyle(Color.accentColor)
@@ -420,7 +427,7 @@ private struct SettingsForm: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
                     .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
                     .padding(.horizontal, 16)
-                    .padding(.top, mode == .window ? 15 : 39)
+                    .padding(.top, mode == .bar ? 39 : 15)
                     .accessibilityHidden(true)
                 }
                 .frame(height: 152)
@@ -439,13 +446,14 @@ private struct SettingsForm: View {
 
     private func statusPreview(_ mode: SearchInterface) -> some View {
         let hidden = StatusItem.hidden(in: model.preferences, interface: mode)
+        let items: [StatusItem] = mode == .classic ? [.results, .duration, .open, .preview, .syntax] : StatusItem.allCases
         return VStack(alignment: .leading, spacing: 6) {
             Text(mode.title).fontWeight(.medium)
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 5) { statusItems(mode, hidden: hidden) }
+                HStack(spacing: 5) { statusItems(mode, hidden: hidden, items: items) }
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 5) { statusItems(mode, hidden: hidden, items: [.results, .duration, .open, .preview]) }
-                    HStack(spacing: 5) { statusItems(mode, hidden: hidden, items: [.syntax, .stash, .actions, .sidePreview]) }
+                    HStack(spacing: 5) { statusItems(mode, hidden: hidden, items: items.filter { [.syntax, .stash, .actions, .sidePreview].contains($0) }) }
                 }
             }
             .padding(6)
@@ -662,15 +670,18 @@ private struct SettingsForm: View {
                 HStack(spacing: 12) {
                     interfaceCard(.window, selection: interface)
                     interfaceCard(.bar, selection: interface)
+                    interfaceCard(.classic, selection: interface)
                 }
                 Picker(L10n.text("settings.interface.defaultResults"), selection: preference("showRecentByDefault", default: true)) {
                     Text(L10n.text("settings.interface.recent")).tag(true)
                     Text(L10n.text("settings.interface.empty")).tag(false)
                 }
-                Picker(L10n.text("view.results"), selection: preference("compactResults")) {
+                Picker(L10n.text("view.results"), selection: interface.wrappedValue == SearchInterface.classic.rawValue
+                       ? .constant(false) : preference("compactResults")) {
                     Text(L10n.text("view.original")).tag(false)
                     Text(L10n.text("view.compact")).tag(true)
                 }
+                .disabled(interface.wrappedValue == SearchInterface.classic.rawValue)
                 option("settings.style.preview", help: "settings.style.previewHint", value: preference("defaultSidePreview"))
             }
             Section(L10n.text("settings.general.window")) {
@@ -695,6 +706,7 @@ private struct SettingsForm: View {
             Section {
                 statusPreview(.window)
                 statusPreview(.bar)
+                statusPreview(.classic)
             } header: {
                 Text(L10n.text("settings.status.title"))
             } footer: {

@@ -38,7 +38,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private(set) var barCollapsed = false
     private static let appearanceKeys = [SearchInterface.key, SearchMaterial.key, "searchTextSize",
                                          "statusBarOpacity", "filterTintStrength",
-                                         StatusItem.key(for: .window), StatusItem.key(for: .bar)]
+                                         StatusItem.key(for: .window), StatusItem.key(for: .bar), StatusItem.key(for: .classic)]
     private let filePaste = FilePasteHandoff()
     private lazy var fileStash = FileStash(preferences: preferences)
     private lazy var scriptWindow = FileScriptWindow()
@@ -177,7 +177,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         searchField.onChange = { [weak self] in self?.setBrowsing(false); self?.startSearch() }
         searchField.onKey = { [weak self] event in self?.handleKey(event) ?? false }
         filters.onChange = { [weak self] in self?.scopeChanged(resetAdditional: false) }
-        results.setCompact(preferences.bool(forKey: "compactResults"))
+        if snapshot { results.setCompact(preferences.bool(forKey: "compactResults")) }
         filters.scopeMenu = { [weak self] in self?.makeScopeMenu() ?? NSMenu() }
         filters.searchOptionsMenu = { [weak self] in self?.makeSearchOptionsMenu() ?? NSMenu() }
         filters.savedMenu = { [weak self] in self?.makeQuickFilterMenu() ?? NSMenu() }
@@ -376,7 +376,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     private func makeResultsViewMenu() -> NSMenu {
         let menu = NSMenu()
-        for (tag, key) in ["view.original", "view.compact"].enumerated() {
+        let layouts = searchInterface == .classic ? ["view.original"] : ["view.original", "view.compact"]
+        for (tag, key) in layouts.enumerated() {
             let item = menu.addItem(withTitle: L10n.text(key), action: #selector(selectResultsView(_:)), keyEquivalent: "")
             item.tag = tag
             item.target = self
@@ -387,17 +388,31 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                                    action: #selector(toggleInlinePreview), keyEquivalent: "")
         preview.target = self
         preview.state = inlinePreviewVisible ? .on : .off
+        let interface = NSMenu()
+        for (index, mode) in SearchInterface.allCases.enumerated() {
+            let item = interface.addItem(withTitle: mode.title, action: #selector(selectSearchInterface(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            item.state = mode == searchInterface ? .on : .off
+        }
+        menu.addItem(withTitle: L10n.text("settings.interface.title"), action: nil, keyEquivalent: "").submenu = interface
         return menu
+    }
+
+    @objc private func selectSearchInterface(_ item: NSMenuItem) {
+        guard SearchInterface.allCases.indices.contains(item.tag) else { return }
+        preferences.set(SearchInterface.allCases[item.tag].rawValue, forKey: SearchInterface.key)
+        applySearchSetting(SearchInterface.key)
     }
 
     @objc private func selectResultsView(_ item: NSMenuItem) {
         let compact = item.tag == 1
-        if !snapshot { preferences.set(compact, forKey: "compactResults") }
+        if !snapshot && searchInterface != .classic { preferences.set(compact, forKey: "compactResults") }
         setResultsLayout(compact: compact)
     }
 
     private func setResultsLayout(compact: Bool) {
-        results.setCompact(compact)
+        results.setCompact(searchInterface != .classic && compact)
         refreshPinnedActions()
         refreshApplicationSuggestions()
     }
@@ -631,6 +646,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private func refreshStyle() {
         searchInterface = SearchInterface(rawValue: preferences.string(forKey: SearchInterface.key) ?? "") ?? .window
         filters.compactToolbar = searchInterface == .bar
+        filters.classicToolbar = searchInterface == .classic
+        footer.classicLayout = searchInterface == .classic
+        setResultsLayout(compact: preferences.bool(forKey: "compactResults"))
         (view as? PanelSurface)?.material = SearchMaterial(rawValue: preferences.string(forKey: SearchMaterial.key) ?? "") ?? .glassy
         let scale = CGFloat(min(125, max(85, preferences.object(forKey: "searchTextSize") as? Int ?? 100))) / 100
         searchField.textScale = scale
@@ -997,10 +1015,13 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         return L10n.text(partial ? "footer.partial" : "footer.results", count, duration)
     }
     #if DEBUG
-    func prepareSearchBarSnapshot() {
+    func prepareInterfaceSnapshot(_ mode: SearchInterface) {
         view.layoutSubtreeIfNeeded()
-        searchInterface = .bar
-        filters.compactToolbar = true
+        searchInterface = mode
+        filters.compactToolbar = mode == .bar
+        filters.classicToolbar = mode == .classic
+        footer.classicLayout = mode == .classic
+        if mode == .classic { setResultsLayout(compact: false) }
         syncBarPresentation(resize: false)
         view.needsLayout = true
     }
