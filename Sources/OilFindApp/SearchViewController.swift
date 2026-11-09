@@ -1234,17 +1234,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         guard urls.count == 1, let file = urls.first else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.droplrShare.upload(file, dismiss: { self.hidePanel?() }) { failure in
-                NSApp.activate()
-                let alert = NSAlert()
-                alert.messageText = L10n.text("droplr.upload")
-                alert.informativeText = L10n.text("droplr." + failure.rawValue)
-                alert.addButton(withTitle: L10n.text("droplr.reveal"))
-                alert.addButton(withTitle: L10n.text("droplr.close"))
-                if alert.runModal() == .alertFirstButtonReturn {
-                    NSWorkspace.shared.activateFileViewerSelecting([file])
-                }
-            }
+            self.droplrShare.upload(file) { self.hidePanel?() }
         }
     }
 
