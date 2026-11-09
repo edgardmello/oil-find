@@ -146,6 +146,20 @@ final class M1Tests: XCTestCase {
         }
         for s in ["foo:bar","size:abc","dm:not-a-date"] { if case .name = Query.parse(s).clauses[0].alternatives[0].matcher {} else { XCTFail("expected fallback \(s)") } }
     }
+    func testClingSyntaxUsesFilenameAndScopeMatchers() throws { try withFixture { f in
+        XCTAssertEqual(f.ids(".jpg .pdf"), f.ids("ext:jpg;pdf"))
+        XCTAssertEqual(f.ids(".jpg | .pdf"), f.ids("ext:jpg;pdf"))
+        XCTAssertEqual(f.ids("!.jpg"), f.ids("!ext:jpg"))
+        XCTAssertEqual(f.ids("in:docs file:"), f.ids("docs/ file:"))
+        XCTAssertEqual(f.ids("!/"), f.ids("file:"))
+        XCTAssertEqual(f.ids("^photo .jpg"), f.ids(".jpg"))
+        XCTAssertEqual(f.ids("readme$ !node_modules"), f.ids("regex:(?i)^readme\\.[^.]+$ !node_modules"))
+        XCTAssertEqual(f.ids("modified:today"), f.ids("dm:today"))
+        XCTAssertTrue(f.ids("depth:1").contains(f.root.appendingPathComponent("README.md").path))
+        XCTAssertFalse(f.ids("depth:1").contains(f.root.appendingPathComponent("src/ReadMe.txt").path))
+        XCTAssertTrue(f.ids("\".hidden\"").contains(f.root.appendingPathComponent(".hidden").path))
+    } }
+
     func testFuzzyFilenameModePreservesExplicitSyntaxAndSeparatesCacheEntries() throws { try withFixture { f in
         let normal = Query.parse("pht ext:jpg")
         let fuzzy = Query.parse(normal.raw, fuzzyNames: true)

@@ -11,12 +11,8 @@ struct FileScript: Codable, Identifiable, Equatable {
     init(url: URL) { path = url.standardizedFileURL.path }
 
     private static let key = "fileScripts"
-    static let shortcutModifiers = UInt32(controlKey | shiftKey)
     static let shortcutKeys = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5,
                                kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9].map(UInt32.init)
-    static func shortcutSlot(keyCode: UInt32, modifiers: UInt32) -> Int? {
-        modifiers == shortcutModifiers ? shortcutKeys.firstIndex(of: keyCode) : nil
-    }
     static let outputLimit = 64 * 1024
 
     static func load(from preferences: UserDefaults) -> [FileScript] {

@@ -39,7 +39,9 @@ final class SearchAccessoryBar: FlippedView {
         stashTable.revealAddedFiles(count)
     }
 
-    func handleStashKey(_ event: NSEvent) -> Bool? { isHidden ? nil : stashTable.handleKey(event) }
+    func handleStashKey(_ event: NSEvent, action: StashShortcut?) -> Bool? {
+        isHidden ? nil : stashTable.handleKey(event, action: action)
+    }
 
     private func button(_ title: String, action: @escaping () -> Void) -> ChromeButton {
         let result = ChromeButton(title, style: .plain, size: 12, weight: .medium)

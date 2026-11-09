@@ -824,6 +824,12 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
 
     private static func decomposeQuery(_ query: Query) -> DecomposedQuery {
         var out = DecomposedQuery()
+        let hasExplicitContent = query.clauses.contains { clause in
+            clause.alternatives.contains { atom in
+                if case .content = atom.matcher, !atom.negated { return true }
+                return false
+            }
+        }
         for clause in query.clauses {
             if clause.alternatives.contains(where: {
                 if case .foldersOnly = $0.matcher, !$0.negated { return true }
@@ -857,10 +863,12 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                     break
                 }
                 switch atom.matcher {
-                case .name(let needle, let cs):
+                case .content(let text):
+                    terms.append(ContentTerm(text: text, caseSensitive: false))
+                case .name(let needle, let cs) where !hasExplicitContent:
                     let str = String(decoding: needle, as: UTF8.self)
                     if str.isEmpty { isPureContentClause = false } else { terms.append(ContentTerm(text: str, caseSensitive: cs)) }
-                case .fileName(let needle):
+                case .fileName(let needle) where !hasExplicitContent:
                     let str = String(decoding: needle, as: UTF8.self)
                     if str.isEmpty { isPureContentClause = false } else { terms.append(ContentTerm(text: str, caseSensitive: false)) }
                 default:

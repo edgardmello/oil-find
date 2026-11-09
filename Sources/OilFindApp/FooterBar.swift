@@ -40,7 +40,7 @@ final class FooterBar: FlippedView {
         stash.title = L10n.text("panel.stashCount", String(stashCount))
         actions.setAccessibilityLabel(actions.title)
         stash.setAccessibilityLabel(stash.title)
-        actions.toolTip = actions.title + " (⌘K)"
+        actions.toolTip = actions.title + " (" + actionsKey + ")"
         needsLayout = true
     }
     private let inlinePreview = NSButton(frame: .zero)
@@ -52,7 +52,18 @@ final class FooterBar: FlippedView {
     private let syntax = KeyHint("⌘/", L10n.text("hint.syntax"))
     var fileActions = true { didSet { needsLayout = true } }
     var spacePreview = false { didSet { updatePreviewKey() } }
-    var previewKey: String { spacePreview ? L10n.text("hint.space") : "⌘Y" }
+    private var actionsKey = "⌘K"
+    private var configuredPreviewKey = "⌘Y"
+    var previewKey: String { spacePreview ? L10n.text("hint.space") : configuredPreviewKey }
+
+    func updateShortcuts(in preferences: UserDefaults) {
+        actionsKey = StashShortcut.actions.symbols(in: preferences)
+        configuredPreviewKey = StashShortcut.preview.symbols(in: preferences)
+        hints[0].key = StashShortcut.open.symbols(in: preferences)
+        syntax.key = StashShortcut.syntax.symbols(in: preferences)
+        updatePreviewKey()
+        refreshButtons()
+    }
     private func updatePreviewKey() { hints[1].key = previewKey; needsLayout = true }
     var warning = false { didSet { status.textColor = warning ? .systemOrange : .tertiaryLabelColor; needsLayout = true } }
     var text: String { get { status.stringValue } set { status.stringValue = newValue } }

@@ -184,23 +184,20 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
         onDragging?(false)
     }
 
-    func handleKey(_ event: NSEvent) -> Bool? {
+    func handleKey(_ event: NSEvent, action: StashShortcut?) -> Bool? {
         guard !isHidden, window?.firstResponder === table else { return nil }
-        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
-        if modifiers == .command {
-            switch event.charactersIgnoringModifiers?.lowercased() {
-            case "c": performStashAction(2); return true
-            case "a": table.selectAll(nil); return true
-            default: break
-            }
-        }
-        if event.keyCode == 36 || event.keyCode == 76 {
-            if !event.isARepeat { performStashAction(modifiers.contains(.command) ? 1 : 0) }
+        switch action {
+        case .copyPath: performStashAction(2); return true
+        case .copyName: performStashAction(9); return true
+        case .selectAll: table.selectAll(nil); return true
+        case .open, .reveal:
+            if !event.isARepeat { performStashAction(action == .reveal ? 1 : 0) }
             return true
+        case .trash: return true
+        case .up, .down, .extendUp, .extendDown, .pageUp, .pageDown, .home, .end, .first, .last:
+            return false
+        default: return nil
         }
-        if event.keyCode == 51, modifiers.contains(.command) { return true }
-        if modifiers.isEmpty || modifiers == .shift, [115, 116, 119, 121, 125, 126].contains(event.keyCode) { return false }
-        return nil
     }
 
     private func makeStashMenu() -> NSMenu {
