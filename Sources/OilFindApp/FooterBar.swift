@@ -56,6 +56,14 @@ final class FooterBar: FlippedView {
     var onChooseApplication: (() -> Void)?
     var onOpenApplication: ((URL) -> Void)?
     private var showsApplicationRow = false
+    var hiddenStatusItems: Set<StatusItem> = [] { didSet { needsLayout = true } }
+    var backgroundOpacity: CGFloat = 0 { didSet { needsDisplay = true } }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.withAlphaComponent(backgroundOpacity).setFill()
+        bounds.fill()
+    }
+
     var showActionHints = true { didSet { needsLayout = true } }
     var desiredHeight: CGFloat { showsApplicationRow ? 62 : 34 }
 
@@ -240,9 +248,12 @@ final class FooterBar: FlippedView {
                                      width: max(0, bounds.width - appChooser.frame.maxX - 24), height: 24)
         }
         settings.frame = NSRect(x: bounds.width - 18 - settings.desiredWidth, y: 4, width: settings.desiredWidth, height: 26)
+        inlinePreview.isHidden = hiddenStatusItems.contains(.sidePreview)
         inlinePreview.frame = NSRect(x: settings.frame.minX - 29, y: 4, width: 26, height: 26)
-        var right = inlinePreview.frame.minX - 6
-        for button in [actions, stash] {
+        var right = (inlinePreview.isHidden ? settings.frame.minX : inlinePreview.frame.minX) - 6
+        for (button, item) in [(actions, StatusItem.actions), (stash, .stash)] {
+            button.isHidden = hiddenStatusItems.contains(item)
+            if button.isHidden { continue }
             let width = ceil(Theme.textWidth(button.title, font: button.font!)) + 14
             button.frame = NSRect(x: right - width, y: 4, width: width, height: 26)
             right = button.frame.minX
@@ -256,7 +267,12 @@ final class FooterBar: FlippedView {
                 button.frame = NSRect(x: right, y: 4, width: width, height: 26)
             }
         }
-        let candidates = pinnedButtons.isEmpty && showActionHints && actionable && !warning ? Array(hints.prefix(fileActions ? 2 : 1)) + [syntax] : [syntax]
+        var candidates: [KeyHint] = []
+        if pinnedButtons.isEmpty && showActionHints && actionable && !warning {
+            if !hiddenStatusItems.contains(.open) { candidates.append(hints[0]) }
+            if fileActions && !hiddenStatusItems.contains(.preview) { candidates.append(hints[1]) }
+        }
+        if !hiddenStatusItems.contains(.syntax) { candidates.append(syntax) }
         let hintWidth = candidates.reduce(0) { $0 + $1.desiredWidth + 8 }
         let visibleHints = right - hintWidth >= 175 ? candidates : []
         for hint in hints + [syntax] { hint.isHidden = !visibleHints.contains(hint) }

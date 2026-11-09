@@ -22,6 +22,17 @@ final class SearchField: FlippedView, NSTextFieldDelegate {
     let editor = SearchEditor()
     private let glass = NSImageView()
     private let clear = NSButton()
+    private let expand = NSButton()
+    var onExpand: (() -> Void)?
+    var showExpand = false { didSet { expand.isHidden = !showExpand; needsLayout = true } }
+    var textScale: CGFloat = 1 {
+        didSet {
+            input.font = .systemFont(ofSize: 21 * textScale)
+            (input.currentEditor() as? NSTextView)?.font = input.font
+            localize()
+            needsLayout = true
+        }
+    }
     private let progress = PassiveProgressIndicator()
     var placeholder: String? { didSet { if placeholder != oldValue { localize() } } }
     private var selectionObserver: NSObjectProtocol?
@@ -51,19 +62,30 @@ final class SearchField: FlippedView, NSTextFieldDelegate {
         clear.contentTintColor = .tertiaryLabelColor; clear.target = self; clear.action = #selector(clearText)
         progress.style = .spinning; progress.controlSize = .small; progress.isDisplayedWhenStopped = false
         [clear, progress].forEach { $0.wantsLayer = true; $0.alphaValue = 0 }
-        [glass, input, clear, progress].forEach(addSubview)
+        expand.isBordered = false
+        expand.image = Theme.symbol("chevron.down", size: 14, weight: .medium)
+        expand.target = self
+        expand.action = #selector(expandPressed)
+        expand.isHidden = true
+        [glass, input, clear, progress, expand].forEach(addSubview)
+        localize()
         updateAccessory()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    @objc private func expandPressed() { onExpand?() }
     func localize() {
+        expand.toolTip = L10n.text("settings.interface.expand")
+        expand.setAccessibilityLabel(expand.toolTip)
         input.placeholderAttributedString = NSAttributedString(string: placeholder ?? L10n.text("placeholder"), attributes: [.font: input.font!, .foregroundColor: NSColor.placeholderTextColor])
     }
     override func layout() {
         super.layout()
         glass.frame = NSRect(x: 24, y: (bounds.height - 22) / 2, width: 22, height: 22)
-        input.frame = NSRect(x: 58, y: (bounds.height - 29) / 2, width: max(0, bounds.width - 112), height: 29)
+        let textHeight = ceil(29 * textScale)
+        input.frame = NSRect(x: 58, y: (bounds.height - textHeight) / 2, width: max(0, bounds.width - 112), height: textHeight)
+        expand.frame = NSRect(x: bounds.width - 42, y: (bounds.height - 24) / 2, width: 24, height: 24)
         clear.frame = NSRect(x: bounds.width - 44, y: (bounds.height - 16) / 2, width: 16, height: 16)
-        progress.frame = NSRect(x: bounds.width - 44, y: (bounds.height - 16) / 2, width: 16, height: 16)
+        progress.frame = NSRect(x: bounds.width - (showExpand ? 68 : 44), y: (bounds.height - 16) / 2, width: 16, height: 16)
     }
     func focus(selectAll: Bool = false) {
         window?.makeFirstResponder(input)

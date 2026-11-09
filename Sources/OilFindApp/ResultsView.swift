@@ -34,6 +34,7 @@ final class ResultCell: NSTableCellView {
     var compact = false {
         didSet { if compact != oldValue { applyStyle() } }
     }
+    var textScale: CGFloat = 1 { didSet { if textScale != oldValue { applyStyle() } } }
     private var configuration = 0
     private var displayingThumbnail = false
     override init(frame: NSRect) {
@@ -54,29 +55,29 @@ final class ResultCell: NSTableCellView {
             icon.frame = NSRect(x: 14, y: 4, width: 16, height: 16)
             var x = CompactFileTable.iconWidth
             for (label, width) in zip([nameLabel, pathLabel, sizeLabel, dateLabel], CompactFileTable.widths(for: bounds.width)) {
-                label.frame = NSRect(x: x + 6, y: 4, width: max(0, width - 12), height: 16)
+                label.frame = NSRect(x: x + 6, y: 4, width: max(0, width - 12), height: 16 * textScale)
                 x += width
             }
             return
         }
         icon.frame = NSRect(x: 26, y: 9, width: 32, height: 32)
         let width = max(0, bounds.width - 236)
-        nameLabel.frame = NSRect(x: 70, y: 8, width: width, height: 18)
+        nameLabel.frame = NSRect(x: 70, y: 8, width: width, height: 18 * textScale)
         if detailLabel.isHidden {
             detailLabel.frame = .zero
-            pathLabel.frame = NSRect(x: 70, y: 27, width: width, height: 15)
+            pathLabel.frame = NSRect(x: 70, y: 27 * textScale, width: width, height: 15 * textScale)
         } else {
             let fullDetailWidth = ceil(detailLabel.attributedStringValue.size().width)
             let maxDetail = max(100, width * 0.62)
             let detailWidth = min(fullDetailWidth, maxDetail)
             let spacing: CGFloat = 6
-            detailLabel.frame = NSRect(x: 70, y: 27, width: detailWidth, height: 15)
+            detailLabel.frame = NSRect(x: 70, y: 27 * textScale, width: detailWidth, height: 15 * textScale)
             let pathX = 70 + detailWidth + spacing
             let pathWidth = max(0, width - detailWidth - spacing)
-            pathLabel.frame = NSRect(x: pathX, y: 27, width: pathWidth, height: 15)
+            pathLabel.frame = NSRect(x: pathX, y: 27 * textScale, width: pathWidth, height: 15 * textScale)
         }
-        dateLabel.frame = NSRect(x: bounds.width - 150, y: 9, width: 124, height: 16)
-        sizeLabel.frame = NSRect(x: bounds.width - 150, y: 27, width: 124, height: 15)
+        dateLabel.frame = NSRect(x: bounds.width - 150, y: 9, width: 124, height: 16 * textScale)
+        sizeLabel.frame = NSRect(x: bounds.width - 150, y: 27 * textScale, width: 124, height: 15 * textScale)
     }
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
@@ -99,10 +100,11 @@ final class ResultCell: NSTableCellView {
 
     private func applyStyle() {
         nameLabel.lineBreakMode = compact ? .byTruncatingMiddle : .byTruncatingTail
-        nameLabel.font = .systemFont(ofSize: compact ? 12 : 13.5, weight: compact ? .regular : .medium)
-        pathLabel.font = .systemFont(ofSize: compact ? 11 : 11.5)
-        dateLabel.font = compact ? .monospacedSystemFont(ofSize: 11, weight: .regular) : .systemFont(ofSize: 11.5)
-        sizeLabel.font = compact ? .monospacedSystemFont(ofSize: 11, weight: .regular) : .monospacedDigitSystemFont(ofSize: 11.5, weight: .regular)
+        nameLabel.font = .systemFont(ofSize: (compact ? 12 : 13.5) * textScale, weight: compact ? .regular : .medium)
+        detailLabel.font = .systemFont(ofSize: 11.5 * textScale)
+        pathLabel.font = .systemFont(ofSize: (compact ? 11 : 11.5) * textScale)
+        dateLabel.font = compact ? .monospacedSystemFont(ofSize: 11 * textScale, weight: .regular) : .systemFont(ofSize: 11.5 * textScale)
+        sizeLabel.font = compact ? .monospacedSystemFont(ofSize: 11 * textScale, weight: .regular) : .monospacedDigitSystemFont(ofSize: 11.5 * textScale, weight: .regular)
         dateLabel.alignment = compact ? .left : .right
         sizeLabel.alignment = dateLabel.alignment
         dateLabel.textColor = compact ? .labelColor : .secondaryLabelColor
@@ -117,7 +119,7 @@ final class ResultCell: NSTableCellView {
         updateThumbnailStyle()
         let name = NSMutableAttributedString(string: item.name, attributes: [.font: nameLabel.font!, .foregroundColor: item.source.isOnline ? NSColor.labelColor : NSColor.tertiaryLabelColor])
         for range in item.source.isOnline ? Presentation.highlightRanges(name: item.name, query: query) : [] {
-            name.addAttributes([.foregroundColor: NSColor.controlAccentColor, .font: NSFont.systemFont(ofSize: compact ? 12 : 13.5, weight: .semibold)], range: range)
+            name.addAttributes([.foregroundColor: NSColor.controlAccentColor, .font: NSFont.systemFont(ofSize: (compact ? 12 : 13.5) * textScale, weight: .semibold)], range: range)
         }
         if compact { name.addAttribute(.paragraphStyle, value: Self.compactNameParagraph, range: NSRange(location: 0, length: name.length)) }
         nameLabel.attributedStringValue = name
@@ -129,7 +131,7 @@ final class ResultCell: NSTableCellView {
             let text = NSMutableAttributedString(string: decoration.text, attributes: [.font: detailLabel.font!, .foregroundColor: NSColor.secondaryLabelColor])
             for range in decoration.highlights where NSMaxRange(range) <= text.length {
                 text.addAttribute(.foregroundColor, value: NSColor.controlAccentColor, range: range)
-                text.addAttribute(.font, value: NSFont.systemFont(ofSize: 11.5, weight: .semibold), range: range)
+                text.addAttribute(.font, value: NSFont.systemFont(ofSize: 11.5 * textScale, weight: .semibold), range: range)
             }
             detailLabel.attributedStringValue = text
         }
@@ -235,14 +237,20 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
     private let compactHeader = CompactFileHeader(stash: false)
     private(set) var compact = false
 
-    func setCompact(_ enabled: Bool) {
-        guard compact != enabled else { return }
+    private var textScale: CGFloat = 1
+
+    func setCompact(_ enabled: Bool) { applyLayout(compact: enabled, textScale: textScale) }
+    func setTextScale(_ scale: CGFloat) { applyLayout(compact: compact, textScale: scale) }
+
+    private func applyLayout(compact enabled: Bool, textScale scale: CGFloat) {
+        guard compact != enabled || textScale != scale else { return }
         let selection = table.selectedRowIndexes
         let focused = selectedRow
         let topRow = max(0, scroll.contentView.bounds.minY + scroll.contentInsets.top) / table.rowHeight
         compact = enabled
+        textScale = scale
         refreshing = true
-        table.rowHeight = enabled ? CompactFileTable.rowHeight : Theme.rowHeight
+        table.rowHeight = ceil((enabled ? CompactFileTable.rowHeight : Theme.rowHeight) * max(1, scale))
         table.headerView = enabled ? compactHeader : nil
         table.gridStyleMask = enabled ? .solidHorizontalGridLineMask : []
         table.gridColor = .separatorColor
@@ -573,6 +581,7 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
         let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? ResultCell ?? ResultCell(frame: .zero)
         cell.identifier = identifier
         cell.compact = compact
+        cell.textScale = textScale
         if let item = result?.additional(at: row), let result { cell.configure(item, query: result.query) }
         else if let item = item(at: row), let result { cell.configure(item, query: result.query, icons: icons) }
         return cell
