@@ -3,9 +3,16 @@ import QuartzCore
 
 final class PanelSurface: FlippedView {
     private let effect = NSVisualEffectView()
-    private let snapshot: Bool
+    private let tint: SurfaceTint
+    var material: SearchMaterial = .glassy {
+        didSet {
+            effect.isHidden = material == .opaque
+            effect.material = material == .vibrant ? .hudWindow : .popover
+            tint.material = material
+        }
+    }
     init(snapshot: Bool) {
-        self.snapshot = snapshot
+        tint = SurfaceTint(snapshot: snapshot)
         super.init(frame: NSRect(origin: .zero, size: Theme.panelSize))
         wantsLayer = true; layer?.cornerRadius = Theme.corner; layer?.cornerCurve = .continuous; layer?.masksToBounds = true
         if !snapshot {
@@ -17,24 +24,27 @@ final class PanelSurface: FlippedView {
             mask.resizingMode = .stretch; effect.maskImage = mask
             addSubview(effect)
         }
-        addSubview(SurfaceTint(snapshot: snapshot))
+        addSubview(tint)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func layout() {
         super.layout(); effect.frame = bounds
-        subviews.first(where: { $0 is SurfaceTint })?.frame = bounds
+        tint.frame = bounds
     }
 }
 
 private final class SurfaceTint: NSView {
     let snapshot: Bool
+    var material: SearchMaterial = .glassy { didSet { needsDisplay = true } }
     init(snapshot: Bool) { self.snapshot = snapshot; super.init(frame: .zero) }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func draw(_ dirtyRect: NSRect) {
         let dark = Theme.dark(self)
         let path = NSBezierPath(roundedRect: bounds, xRadius: 22, yRadius: 22)
-        if snapshot {
+        if material == .opaque {
+            NSColor.windowBackgroundColor.setFill(); path.fill()
+        } else if snapshot {
             NSColor(srgbRed: dark ? 35/255 : 244/255, green: dark ? 35/255 : 244/255, blue: dark ? 38/255 : 246/255, alpha: 1).setFill(); path.fill()
         }
         (dark ? NSColor.black.withAlphaComponent(0.18) : NSColor.white.withAlphaComponent(0.30)).setFill(); path.fill()
@@ -105,9 +115,11 @@ final class SearchPanel: NSPanel {
         }
         guard let screen = target ?? NSScreen.main else { return }
         let visible = screen.visibleFrame
-        let width = min(searchController.inlinePreviewVisible ? 1160 : 800, visible.width - 80)
-        let height = min(560, visible.height - 120)
-        let frame = NSRect(x: (visible.midX - width / 2).rounded(), y: (visible.midY - height / 2).rounded(),
+        let width = min(searchController.inlinePreviewVisible && !searchController.barCollapsed ? 1160 : 800, visible.width - 80)
+        let expandedHeight = min(560, visible.height - 120)
+        let height = searchController.barCollapsed ? 64 : expandedHeight
+        let top = (visible.midY + expandedHeight / 2).rounded()
+        let frame = NSRect(x: (visible.midX - width / 2).rounded(), y: top - height,
                            width: width, height: height)
         setFrame(frame, display: display)
         invalidateShadow()

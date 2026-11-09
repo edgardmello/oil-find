@@ -32,6 +32,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private var coverageExplanation: CoverageExplanation?
     private let snapshot: Bool
     private let preferences: UserDefaults
+    private var searchInterface: SearchInterface = .window
+    private var barExpandedManually = false
+    private(set) var barCollapsed = false
+    private static let appearanceKeys = [SearchInterface.key, SearchMaterial.key, "searchTextSize",
+                                         "statusBarOpacity", "filterTintStrength",
+                                         StatusItem.key(for: .window), StatusItem.key(for: .bar)]
     private let filePaste = FilePasteHandoff()
     private lazy var fileStash = FileStash(preferences: preferences)
     private lazy var scriptWindow = FileScriptWindow()
@@ -159,6 +165,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         syntax.shortcutPreferences = preferences
         accessories.configureStashControls(preferences: preferences) { [weak self] in self?.clearStash() }
         refreshShortcuts()
+        if !snapshot { refreshStyle() }
+        searchField.onExpand = { [weak self] in self?.expandSearchBar() }
         syntax.onExample = { [weak self] example in
             guard let self else { return }; self.setBrowsing(false); self.searchField.text = example; self.toggleSyntax(false); self.searchField.focus(); self.startSearch()
         }
@@ -265,6 +273,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     override func viewDidLayout() {
         super.viewDidLayout()
         let w = view.bounds.width, h = view.bounds.height, px = Theme.pixel(view)
+        searchField.showExpand = barCollapsed
+        if barCollapsed {
+            searchField.frame = NSRect(x: 0, y: 0, width: w, height: h)
+            [topLine, filters, results, empty, indexing, bottomLine, footer, inlinePreview, accessories, syntaxScroll].forEach { $0.frame = .zero }
+            return
+        }
         searchField.frame = NSRect(x: 0, y: 0, width: w, height: 64)
         topLine.frame = NSRect(x: 0, y: 64, width: w, height: px)
         filters.frame = NSRect(x: 0, y: 64 + px, width: w, height: FilterBar.toolbarHeight)
@@ -611,8 +625,43 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         footer.setPinnedActions(results.compact ? PinnedFileAction.selected(in: preferences) : [])
     }
 
+    private func refreshStyle() {
+        searchInterface = SearchInterface(rawValue: preferences.string(forKey: SearchInterface.key) ?? "") ?? .window
+        (view as? PanelSurface)?.material = SearchMaterial(rawValue: preferences.string(forKey: SearchMaterial.key) ?? "") ?? .glassy
+        let scale = CGFloat(min(125, max(85, preferences.object(forKey: "searchTextSize") as? Int ?? 100))) / 100
+        searchField.textScale = scale
+        results.setTextScale(scale)
+        footer.hiddenStatusItems = StatusItem.hidden(in: preferences, interface: searchInterface)
+        footer.backgroundOpacity = CGFloat(min(1, max(0, preferences.object(forKey: "statusBarOpacity") as? Double ?? 0)))
+        filters.tintStrength = CGFloat(min(1, max(0, preferences.object(forKey: "filterTintStrength") as? Double ?? 1)))
+    }
+
+    private func syncBarPresentation(resize: Bool = true) {
+        let collapsed = searchInterface == .bar && !barExpandedManually && !syntaxVisible
+            && searchField.text.isEmpty && folderScope == nil && savedCriteria == nil
+            && volumeScope == nil && !hiddenOnly && filters.options.kind == nil && !filters.additionalSelected
+        guard collapsed != barCollapsed else { return }
+        barCollapsed = collapsed
+        view.needsLayout = true
+        if resize { (view.window as? SearchPanel)?.resizeForInlinePreview() }
+    }
+
+    private func expandSearchBar() {
+        barExpandedManually = true
+        syncBarPresentation()
+        searchField.focus()
+        startSearch(preserveSelection: true)
+    }
+
     func applySearchSetting(_ key: String) {
         guard isViewLoaded else { return }
+        if Self.appearanceKeys.contains(key) {
+            if key == SearchInterface.key { barExpandedManually = false }
+            refreshStyle()
+            if let result = results.result { updateFooter(result) }
+            syncBarPresentation()
+            return
+        }
         switch key {
         case "compactResults":
             setResultsLayout(compact: preferences.bool(forKey: key))
@@ -623,6 +672,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             footer.showActionHints = preferences.object(forKey: key) as? Bool ?? true
         case PinnedFileAction.preferenceKey:
             refreshPinnedActions()
+        case "showRecentByDefault":
+            startSearch(preserveSelection: true)
         case "showOpenWithRow":
             refreshApplicationSuggestions()
         default:
@@ -636,6 +687,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     func preparePanelAppearance() {
         if !snapshot {
+            barExpandedManually = false
+            syncBarPresentation(resize: false)
             setInlinePreviewVisible(preferences.bool(forKey: "defaultSidePreview"), resize: false)
         }
     }
@@ -682,6 +735,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
     }
     func startSearch(preserveSelection: Bool = false) {
+        syncBarPresentation()
         pendingNewSearch = preserveSelection
         results.cancelPendingRefresh()
         search(refresh: false, preserveSelection: preserveSelection)
@@ -709,7 +763,20 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let store = sources.first?.store
         var options = filters.options
         if !snapshot { options.pinyin = UserDefaults.standard.bool(forKey: "pinyinEnabled") }
-        let query = editingQuery(store: store), previous = results.result
+        let query = editingQuery(store: store)
+        if !snapshot && !additionalOnly && volumeScope == nil && options.kind == nil && query.isEmpty
+            && preferences.object(forKey: "showRecentByDefault") as? Bool == false && !barExpandedManually {
+            pendingNewSearch = nil
+            additionalPending = false
+            diagnostics = []
+            results.clear(preservingViewport: false)
+            setState(manager != nil && manager?.store == nil ? .indexing : .empty)
+            footer.warning = false
+            footer.text = ""
+            refreshProgress()
+            return
+        }
+        let previous = results.result
         let cancelled = { [generation] in !generation.current(token) }
         let supplementary = additionalOnly ? nil : supplementaryProvider?.prepareSearch(query, options: options, sources: sources, isCancelled: cancelled)
         let additional = additionalSearchProvider.flatMap { provider in
@@ -839,6 +906,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     func toggleSyntax(_ show: Bool? = nil) {
         let visible = show ?? !syntaxVisible
         syntaxVisible = visible
+        syncBarPresentation()
         refreshInlinePreview()
         refreshApplicationSuggestions()
         view.needsLayout = true
@@ -897,15 +965,27 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if let diagnostic = diagnostics.first { footer.text = L10n.diagnostic(diagnostic); return }
         if additionalSearchFailed { footer.warning = true; footer.text = L10n.text("search.failed"); return }
         if filters.additionalSelected {
-            footer.text = L10n.text("footer.results", Presentation.countText(result.total), Presentation.elapsedText(result.elapsedMs))
+            footer.text = resultStatus(result)
             if let status = additionalSearchProvider?.status { footer.text = status }
         } else if result.query.isEmpty {
             let count = Presentation.countText(result.sources.reduce(0) { count, source in count + source.store.read { source.store.liveCount } })
-            footer.text = L10n.text("footer.recent", count)
+            footer.text = footer.hiddenStatusItems.contains(.results) ? "" : L10n.text("footer.recent", count)
         } else {
-            footer.text = L10n.text(result.sortedCount < result.total ? "footer.partial" : "footer.results", Presentation.countText(result.total), Presentation.elapsedText(result.elapsedMs))
+            footer.text = resultStatus(result, partial: result.sortedCount < result.total)
         }
         if multipleSelected { footer.text = L10n.text("footer.selected", Presentation.countText(results.selectionCount)) }
+    }
+    private func resultStatus(_ result: SearchPresentation, partial: Bool = false) -> String {
+        let count = Presentation.countText(result.total)
+        let duration = Presentation.elapsedText(result.elapsedMs)
+        let hidden = footer.hiddenStatusItems
+        if hidden.contains(.results) {
+            return hidden.contains(.duration) ? "" : L10n.text("footer.durationOnly", duration)
+        }
+        if hidden.contains(.duration) {
+            return L10n.text(partial ? "footer.partialOnly" : "footer.countOnly", count)
+        }
+        return L10n.text(partial ? "footer.partial" : "footer.results", count, duration)
     }
     func prepareSnapshot(state: String, query: String, options: SearchOptions, store: IndexStore?, selection: Int, additionalSources: [SearchSource] = [], additionalOnly: Bool = false) throws {
         _ = view
@@ -990,6 +1070,10 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if searchField.editor.hasMarkedText() { return false }
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        if barCollapsed && event.keyCode == 125 && flags.intersection([.command, .control, .option, .shift]).isEmpty {
+            expandSearchBar()
+            return true
+        }
         // A nonactivating panel has no Edit menu to dispatch text shortcuts.
         if flags.intersection([.command, .control, .option, .shift]) == .command,
            let editor = searchField.input.currentEditor() {
@@ -1011,6 +1095,22 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             action = .reveal
         } else {
             action = panelShortcuts[chord]
+        }
+
+        if !snapshot && action == nil && flags.intersection([.command, .control, .option]) == .command {
+            let size = preferences.object(forKey: "searchTextSize") as? Int ?? 100
+            let next: Int?
+            switch key {
+            case "=", "+": next = min(125, size + 5)
+            case "-": next = max(85, size - 5)
+            case "0": next = 100
+            default: next = nil
+            }
+            if let next {
+                preferences.set(next, forKey: "searchTextSize")
+                applySearchSetting("searchTextSize")
+                return true
+            }
         }
 
         if let handled = accessories.handleStashKey(event, action: action) { return handled }

@@ -9,6 +9,12 @@ final class FilterBar: FlippedView, NSMenuDelegate {
     private let capsule = TintPlate(radius: 13) { view in
         NSColor.controlAccentColor.withAlphaComponent(Theme.dark(view) ? 0.26 : 0.15)
     }
+    var tintStrength: CGFloat = 1 {
+        didSet {
+            capsule.alphaValue = tintStrength
+            refreshScope()
+        }
+    }
     private var laidOut = false
     private(set) var additionalSelected = false
     var additionalTitle: String? {
@@ -68,14 +74,17 @@ final class FilterBar: FlippedView, NSMenuDelegate {
     static func sortName(_ key: SortKey) -> String {
         switch key { case .relevance: return "relevance"; case .name: return "name"; case .modified: return "modified"; case .size: return "size" }
     }
+    private var activeTint: NSColor {
+        NSColor.secondaryLabelColor.blended(withFraction: tintStrength, of: .controlAccentColor) ?? .controlAccentColor
+    }
     private func refreshScope() {
         scopeButton.title = L10n.text("scope.menu")
         searchOptionsButton.title = L10n.text("scope.options")
         savedButton.title = L10n.text("scope.saved")
         viewButton.title = L10n.text("scope.view")
-        searchOptionsButton.textTint = searchOptionsActive ? .controlAccentColor : nil
+        searchOptionsButton.textTint = searchOptionsActive ? activeTint : nil
         searchOptionsButton.needsDisplay = true
-        scopeButton.textTint = scopeActive ? .controlAccentColor : nil
+        scopeButton.textTint = scopeActive ? activeTint : nil
         scopeButton.needsDisplay = true
         needsLayout = true
     }

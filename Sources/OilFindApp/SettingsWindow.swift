@@ -367,6 +367,115 @@ private struct SettingsForm: View {
         })
     }
 
+    private func stylePreference<Value>(_ key: String, fallback: Value) -> Binding<Value> {
+        Binding(get: { model.preferences.object(forKey: key) as? Value ?? fallback }, set: { value in
+            model.objectWillChange.send()
+            model.preferences.set(value, forKey: key)
+            model.onSearchSettingsChange?(key)
+        })
+    }
+
+    private func interfaceCard(_ mode: SearchInterface, selection: Binding<String>) -> some View {
+        let selected = selection.wrappedValue == mode.rawValue
+        return Button {
+            selection.wrappedValue = mode.rawValue
+        } label: {
+            VStack(spacing: 8) {
+                ZStack(alignment: .top) {
+                    LinearGradient(colors: [.accentColor.opacity(0.26), .gray.opacity(0.12)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass")
+                            Text(L10n.text("placeholder"))
+                                .lineLimit(1)
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                        }
+                        .font(.caption)
+                        .padding(7)
+                        .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
+                        if mode == .window {
+                            ForEach(0..<4) { row in
+                                HStack(spacing: 8) {
+                                    Image(systemName: row == 0 ? "folder.fill" : "doc")
+                                        .foregroundStyle(Color.accentColor)
+                                    Capsule().fill(.secondary.opacity(0.45)).frame(width: row.isMultiple(of: 2) ? 66 : 46, height: 3)
+                                    Spacer()
+                                    Capsule().fill(.secondary.opacity(0.25)).frame(width: 30, height: 3)
+                                }
+                            }
+                            .font(.caption2)
+                            Divider()
+                            HStack(spacing: 8) {
+                                Image(systemName: "return")
+                                Image(systemName: "eye")
+                                Spacer()
+                                Image(systemName: "gearshape")
+                            }
+                            .font(.caption2)
+                        }
+                    }
+                    .padding(8)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+                    .padding(.horizontal, 16)
+                    .padding(.top, mode == .window ? 15 : 39)
+                    .accessibilityHidden(true)
+                }
+                .frame(height: 152)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.12),
+                                                                      lineWidth: selected ? 3 : 1))
+                Text(mode.title)
+                    .fontWeight(selected ? .semibold : .regular)
+                    .foregroundStyle(selected ? .primary : .secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func statusPreview(_ mode: SearchInterface) -> some View {
+        let hidden = StatusItem.hidden(in: model.preferences, interface: mode)
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(mode.title).fontWeight(.medium)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 5) { statusItems(mode, hidden: hidden) }
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 5) { statusItems(mode, hidden: hidden, items: [.results, .duration, .open, .preview]) }
+                    HStack(spacing: 5) { statusItems(mode, hidden: hidden, items: [.syntax, .stash, .actions, .sidePreview]) }
+                }
+            }
+            .padding(6)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+        }
+    }
+
+    private func statusItems(_ mode: SearchInterface, hidden: Set<StatusItem>, items: [StatusItem] = StatusItem.allCases) -> some View {
+        ForEach(items, id: \.rawValue) { item in
+            let shown = !hidden.contains(item)
+            Button {
+                var updated = hidden
+                if shown { updated.insert(item) } else { updated.remove(item) }
+                stylePreference(StatusItem.key(for: mode), fallback: [String]()).wrappedValue = updated.map(\.rawValue).sorted()
+            } label: {
+                Text(item.title)
+                    .font(.caption)
+                    .foregroundStyle(shown ? .primary : .secondary)
+                    .strikethrough(!shown)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+                    .background(shown ? Color.accentColor.opacity(0.11) : Color.primary.opacity(0.04),
+                                in: RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(shown ? .isSelected : [])
+            .help(L10n.text(shown ? "settings.status.hide" : "settings.status.show", item.title))
+        }
+    }
+
     private func option(_ title: String, help: String, value: Binding<Bool>) -> some View {
         Toggle(isOn: value) {
             VStack(alignment: .leading, spacing: 3) {
@@ -397,26 +506,14 @@ private struct SettingsForm: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    private func resultExample(table: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if table {
-                HStack {
-                    Text(L10n.text("stash.column.name"))
-                    Spacer()
-                    Text(L10n.text("stash.column.size"))
-                }.foregroundStyle(.secondary)
-                Divider()
-            }
-            ForEach(["Report.pdf", "Notes.txt"], id: \.self) { file in
-                HStack {
-                    Label(file, systemImage: "doc")
-                    Spacer()
-                    if table { Text(file == "Report.pdf" ? "128 KB" : "4 KB").foregroundStyle(.secondary) }
-                }
-                if !table { Text("~/Documents").foregroundStyle(.secondary).padding(.leading, 18) }
-            }
+    private func styleSlider(_ title: String, value: Binding<Double>) -> some View {
+        HStack {
+            Slider(value: value, in: 0...1, step: 0.05) { Text(L10n.text(title)) }
+            Text("\(Int((value.wrappedValue * 100).rounded()))%")
+                .monospacedDigit().foregroundStyle(.secondary)
+                .frame(width: 42, alignment: .trailing)
+                .accessibilityHidden(true)
         }
-        .font(.caption)
     }
 
     private func matchingExample(_ query: String) -> some View {
@@ -559,21 +656,49 @@ private struct SettingsForm: View {
                 hint(L10n.text("settings.version", UpdateManager.current.version.text))
             }
         case .style:
-            let compact = preference("compactResults")
-            Section(L10n.text("view.results")) {
-                HStack(alignment: .top, spacing: 12) {
-                    previewChoice("view.original", example: "settings.style.listHint", selected: !compact.wrappedValue) {
-                        compact.wrappedValue = false
-                    } preview: {
-                        resultExample(table: false)
-                    }
-                    previewChoice("view.compact", example: "settings.style.tableHint", selected: compact.wrappedValue) {
-                        compact.wrappedValue = true
-                    } preview: {
-                        resultExample(table: true)
-                    }
+            let interface = stylePreference(SearchInterface.key, fallback: SearchInterface.window.rawValue)
+            let size = stylePreference("searchTextSize", fallback: 100)
+            Section(L10n.text("settings.interface.title")) {
+                HStack(spacing: 12) {
+                    interfaceCard(.window, selection: interface)
+                    interfaceCard(.bar, selection: interface)
+                }
+                Picker(L10n.text("settings.interface.defaultResults"), selection: preference("showRecentByDefault", default: true)) {
+                    Text(L10n.text("settings.interface.recent")).tag(true)
+                    Text(L10n.text("settings.interface.empty")).tag(false)
+                }
+                Picker(L10n.text("view.results"), selection: preference("compactResults")) {
+                    Text(L10n.text("view.original")).tag(false)
+                    Text(L10n.text("view.compact")).tag(true)
                 }
                 option("settings.style.preview", help: "settings.style.previewHint", value: preference("defaultSidePreview"))
+            }
+            Section(L10n.text("settings.general.window")) {
+                Picker(L10n.text("settings.material.title"),
+                       selection: stylePreference(SearchMaterial.key, fallback: SearchMaterial.glassy.rawValue)) {
+                    ForEach(SearchMaterial.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+                Stepper(value: size, in: 85...125, step: 5) {
+                    LabeledContent {
+                        Text("\(size.wrappedValue)%").monospacedDigit()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(L10n.text("settings.style.textSize"))
+                            hint(L10n.text("settings.style.textSizeHelp"))
+                        }
+                    }
+                }
+                styleSlider("settings.style.statusOpacity", value: stylePreference("statusBarOpacity", fallback: 0.0))
+                styleSlider("settings.style.filterTint", value: stylePreference("filterTintStrength", fallback: 1.0))
+            }
+            Section {
+                statusPreview(.window)
+                statusPreview(.bar)
+            } header: {
+                Text(L10n.text("settings.status.title"))
+            } footer: {
+                hint(L10n.text("settings.status.hint"))
             }
         case .actionBar:
             Section(L10n.text("settings.actionBar.rows")) {
