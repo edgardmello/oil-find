@@ -255,7 +255,7 @@ public enum Searcher {
                     }
                     let scratch = SearchScratch(streamCount: narrowed ? 0 : (plan.drivers?.count ?? 0) * 2,
                                                 chunkSize: chunkSize,
-                                                needsCandidates: narrowed || plan.drivers != nil || simpleName,
+                                                needsCandidates: simpleName || (!narrowed && plan.drivers != nil),
                                                 needsScanOut: (!narrowed && (plan.drivers != nil || plan.hasFastFilter || options.kind != nil)) || (narrowed && simpleName),
                                                 needsScoreOut: simpleName)
                     var block = worker
@@ -331,18 +331,26 @@ public enum Searcher {
               query.clauses.count >= previous.query.clauses.count else { return false }
         for i in previous.query.clauses.indices {
             let old = previous.query.clauses[i].alternatives, new = query.clauses[i].alternatives
-            guard old.count == 1, new.count == 1, !old[0].negated, !new[0].negated,
-                  case .name(let oldNeedle, let oldCase) = old[0].matcher,
-                  case .name(let newNeedle, let newCase) = new[0].matcher, oldCase == newCase else { return false }
-            // An empty name atom is not a universal match in the existing scorer.
-            if oldNeedle.isEmpty { return false }
-            // Non-ASCII needles also match Unicode lowercase keys; ASCII needles
-            // only use pinyin keys. Changing that key domain is not monotonic.
-            if !oldCase && oldNeedle.allSatisfy({ $0 < 128 }) && newNeedle.contains(where: { $0 >= 128 }) { return false }
-            let contains = newNeedle.withUnsafeBufferPointer { n in
-                oldNeedle.withUnsafeBufferPointer { o in sift_contains(n.baseAddress, n.count, o.baseAddress, o.count, 1) != 0 }
+            guard old.count == 1, new.count == 1, !old[0].negated, !new[0].negated else { return false }
+            switch (old[0].matcher, new[0].matcher) {
+            case (.name(let oldNeedle, let oldCase), .name(let newNeedle, let newCase)):
+                // An empty name atom is not a universal match in the existing scorer.
+                guard oldCase == newCase, !oldNeedle.isEmpty else { return false }
+                // Changing the alternate-key domain is not monotonic for ordinary names.
+                if !oldCase && oldNeedle.allSatisfy({ $0 < 128 }) && newNeedle.contains(where: { $0 >= 128 }) { return false }
+                let contains = newNeedle.withUnsafeBufferPointer { n in
+                    oldNeedle.withUnsafeBufferPointer { o in sift_contains(n.baseAddress, n.count, o.baseAddress, o.count, 1) != 0 }
+                }
+                guard contains else { return false }
+            case (.fuzzyName(let oldNeedle), .fuzzyName(let newNeedle)):
+                guard newNeedle.starts(with: oldNeedle) else { return false }
+            case (.ext(let oldKeys), .ext(let newKeys)):
+                guard oldKeys == newKeys else { return false }
+            case (.kind(let oldKind), .kind(let newKind)):
+                guard oldKind == newKind else { return false }
+            default:
+                return false
             }
-            if !contains { return false }
         }
         return true
     }
@@ -469,10 +477,9 @@ public enum Searcher {
             plan.clauses.withUnsafeBufferPointer { clauses in
                 let simpleName = options.sort == .relevance && plan.canBatchName
                 if let candidates {
-                    guard scratch.candidates != nil else { cancelled = true; return }
-                    scratch.candidates!.removeAll(keepingCapacity: true)
                     if simpleName {
-                        guard let scanOut = scratch.scanOut else { cancelled = true; return }
+                        guard scratch.candidates != nil, let scanOut = scratch.scanOut else { cancelled = true; return }
+                        scratch.candidates!.removeAll(keepingCapacity: true)
                         let atom = atoms[0]
                         var start = 0
                         while start < candidates.count {
@@ -485,7 +492,7 @@ public enum Searcher {
                             scratch.candidates!.append(contentsOf: UnsafeBufferPointer(start: scanOut, count: count))
                             start = end
                         }
-                    } else { scratch.candidates!.append(contentsOf: candidates) }
+                    }
                 } else if let drivers = plan.drivers {
                     guard scratch.candidates != nil, scratch.scanOut != nil else { cancelled = true; return }
                     cancelled = generateCandidates(e0: e0, e1: e1, drivers: drivers, store: store, scratch: scratch, isCancelled: isCancelled)
@@ -509,16 +516,20 @@ public enum Searcher {
                         cancelled = scoreNameWithNegations(atoms[0], candidates: candidateIDs, plan: plan, options: options, store: store, now: now, scratch: scratch, isCancelled: isCancelled)
                     }
                 } else if candidates != nil || plan.drivers != nil {
-                    guard let candidateIDs = scratch.candidates else { cancelled = true; return }
-                    var start = 0
-                    while start < candidateIDs.count {
-                        if start > 0 && isCancelled() { cancelled = true; break }
-                        let end = min(start + 4096, candidateIDs.count)
-                        for j in start..<end {
-                            if let entry = evaluateHot(id: candidateIDs[j], atoms: atoms.baseAddress!, clauses: clauses.baseAddress!, clauseCount: clauses.count, plan: plan, options: options, store: store, now: now, scratch: scratch, isCancelled: isCancelled) { scratch.ranked.append(entry) }
+                    func evaluateCandidates(_ ids: UnsafeBufferPointer<UInt32>) {
+                        var start = 0
+                        while start < ids.count {
+                            if start > 0 && isCancelled() { cancelled = true; break }
+                            let end = min(start + 4096, ids.count)
+                            for j in start..<end {
+                                if let entry = evaluateHot(id: ids[j], atoms: atoms.baseAddress!, clauses: clauses.baseAddress!, clauseCount: clauses.count, plan: plan, options: options, store: store, now: now, scratch: scratch, isCancelled: isCancelled) { scratch.ranked.append(entry) }
+                            }
+                            start = end
                         }
-                        start = end
                     }
+                    if let candidates { evaluateCandidates(candidates) }
+                    else if let generated = scratch.candidates { generated.withUnsafeBufferPointer(evaluateCandidates) }
+                    else { cancelled = true }
                 } else if plan.hasFastFilter || options.kind != nil {
                     guard let scanOut = scratch.scanOut else { cancelled = true; return }
                     let kindMask = options.kind.map { plan.allowedKinds & (1 << $0) } ?? plan.allowedKinds

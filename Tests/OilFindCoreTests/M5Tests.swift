@@ -77,6 +77,28 @@ final class M5Tests: XCTestCase {
         }
     }
 
+    func testFuzzyTypingReusesCandidatesOnlyForNarrowerQueries() throws {
+        let s = store(["README.md", "ReadMe.txt", "Release Draft Map.md", "roadmap.md", "项目文档.md", "项链.md"])
+        let cases = [
+            ("fuzzy:r", "fuzzy:rdm", true),
+            ("fuzzy:r ext:md", "fuzzy:rdm ext:md", true),
+            ("fuzzy:项 ext:md", "fuzzy:项文 ext:md", true),
+            ("fuzzy:rdm", "fuzzy:r", false),
+            ("fuzzy:r ext:md", "fuzzy:rdm ext:txt", false),
+            ("fuzzy:r", "!fuzzy:rdm", false)
+        ]
+        for sort in [SortKey.relevance, .name, .modified, .size] {
+            let options = SearchOptions(sort: sort)
+            for (old, new, canNarrow) in cases {
+                let previous = try XCTUnwrap(Searcher.search(Query.parse(old), options: options, in: s))
+                let query = Query.parse(new)
+                let result = try XCTUnwrap(Searcher.search(query, options: options, in: s, previous: previous))
+                XCTAssertEqual(result.isNarrowed, canNarrow, new)
+                same(result, try XCTUnwrap(Searcher.search(query, options: options, in: s)))
+            }
+        }
+    }
+
     func testT60LargeResultsAndChunkBoundaries() throws {
         let s = store(["readme.md", "README.txt", "my-readme", "mreadme-extra", "readmeMore", "replay", "r", "other"], copies: 40_001)
         s.write { s.flags[65_536] |= SiftFlag.deleted; s.flags[131_073] |= SiftFlag.deleted; s.deletedCount = 2; s.liveCount -= 2 }
