@@ -14,12 +14,16 @@ public enum Presentation {
     }
 
     public static func highlightRanges(name: String, query: Query) -> [NSRange] {
+        let text = name as NSString
+        var ranges: [NSRange] = []
         var literals: [String] = []
         for clause in query.clauses {
             for atom in clause.alternatives where !atom.negated {
                 switch atom.matcher {
                 case .name(let needle, _):
                     literals.append(String(decoding: needle, as: UTF8.self))
+                case .fuzzyName(let needle):
+                    ranges += fuzzyHighlightRanges(text, needle: String(decoding: needle, as: UTF8.self))
                 case .glob(let pattern, _):
                     literals += String(decoding: pattern, as: UTF8.self)
                         .split(whereSeparator: { $0 == "*" || $0 == "?" }).map(String.init)
@@ -27,8 +31,6 @@ public enum Presentation {
                 }
             }
         }
-        let text = name as NSString
-        var ranges: [NSRange] = []
         for literal in literals where !literal.isEmpty {
             var start = 0
             while start < text.length {
@@ -48,6 +50,26 @@ public enum Presentation {
             } else { merged.append(range) }
         }
         return merged
+    }
+
+    private static func fuzzyHighlightRanges(_ name: NSString, needle: String) -> [NSRange] {
+        guard !needle.isEmpty else { return [] }
+        let contiguous = name.range(of: needle, options: [.caseInsensitive, .literal])
+        if contiguous.location != NSNotFound {
+            return [name.rangeOfComposedCharacterSequences(for: contiguous)]
+        }
+
+        var ranges: [NSRange] = []
+        var start = 0
+        for scalar in needle.unicodeScalars {
+            guard start < name.length else { return [] }
+            let range = name.range(of: String(scalar), options: [.caseInsensitive, .literal],
+                                   range: NSRange(location: start, length: name.length - start))
+            guard range.location != NSNotFound else { return [] }
+            ranges.append(name.rangeOfComposedCharacterSequences(for: range))
+            start = NSMaxRange(range)
+        }
+        return ranges
     }
 
     public static func abbreviate(path: String, home: String) -> String {

@@ -2,6 +2,17 @@ import XCTest
 @testable import OilFindCore
 
 final class M3Tests: XCTestCase {
+    func testFuzzyHighlightsShowOrderedMatchesAndPreferContiguousText() {
+        XCTAssertEqual(Presentation.highlightRanges(name: "ReadMe.md", query: Query.parse("fuzzy:rdm")),
+                       [NSRange(location: 0, length: 1), NSRange(location: 3, length: 1), NSRange(location: 4, length: 1)])
+        XCTAssertEqual(Presentation.highlightRanges(name: "Release Draft Map-rdm", query: Query.parse("rdm", fuzzyNames: true)),
+                       [NSRange(location: 18, length: 3)])
+        XCTAssertEqual(Presentation.highlightRanges(name: "📄项目文档", query: Query.parse("fuzzy:📄文")),
+                       [NSRange(location: 0, length: 2), NSRange(location: 4, length: 1)])
+        XCTAssertTrue(Presentation.highlightRanges(name: "ReadMe.md", query: Query.parse("fuzzy:rmz")).isEmpty)
+        XCTAssertTrue(Presentation.highlightRanges(name: "ReadMe.md", query: Query.parse("!fuzzy:rdm")).isEmpty)
+    }
+
     func testT40HighlightRanges() {
         func ranges(_ name: String, _ query: String) -> [NSRange] {
             Presentation.highlightRanges(name: name, query: Query.parse(query))
