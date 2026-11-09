@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import { SearchItem, findApplication, startBridge, updateStash } from "./bridge";
 import { displayPath } from "./paths";
 import { ItemDetail, formatDate, formatSize } from "./preview";
+import { ScriptsSubmenu } from "./scripts";
 
 export default function Stash() {
   const { applicationPath } = getPreferenceValues<{ applicationPath?: string }>();
@@ -25,6 +26,7 @@ export default function Stash() {
   const [showingDetail, setShowingDetail] = useState(false);
   const [retry, setRetry] = useState(0);
   const application = useRef<string | undefined>(undefined);
+  const executable = useRef<string | undefined>(undefined);
   const bridge = useRef<ReturnType<typeof startBridge> | undefined>(undefined);
   const request = useRef(0);
   const pendingCopy = useRef<number | undefined>(undefined);
@@ -40,6 +42,7 @@ export default function Stash() {
       return;
     }
     application.current = target.application;
+    executable.current = target.executable;
     const session = startBridge(
       target.executable,
       (response) => {
@@ -115,6 +118,11 @@ export default function Stash() {
           pendingCopy.current = ++request.current;
           bridge.current?.send(pendingCopy.current, { type: "copyFiles", paths: available.map((item) => item.path) });
         }}
+      />
+      <ScriptsSubmenu
+        executable={executable.current}
+        paths={available.map((item) => item.path)}
+        title={`Run Script on All ${available.length} Files`}
       />
       {showInOilFind}
       <Action

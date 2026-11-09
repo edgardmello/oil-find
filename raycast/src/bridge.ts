@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 // Must match OilFindRaycastProtocol in the app's Info.plist.
-const protocolVersion = "3";
+const protocolVersion = "4";
 
 export interface SearchItem {
   path: string;
@@ -17,14 +17,41 @@ export interface SearchItem {
   snippet?: string;
   /** Set for stashed files that no longer exist. */
   missing?: boolean;
+  /** Set for results from a drive that is not connected. */
+  offline?: boolean;
 }
 
 export interface SearchFilter {
   id: string;
   name: string;
-  section: "kind" | "quick" | "folder" | "saved";
+  section: "kind" | "quick" | "folder" | "saved" | "drive";
   symbol?: string;
   query?: string;
+  connected?: boolean;
+}
+
+export interface FileScript {
+  path: string;
+  name: string;
+}
+
+export interface ScriptRun {
+  status: "exited" | "signaled" | "stopped" | "failed";
+  code?: number;
+  output: string;
+  truncated: boolean;
+}
+
+export interface IndexStatus {
+  /** "startup", or the drive UUID used by drive: filters. */
+  id: string;
+  name: string;
+  root: string;
+  items: number;
+  fileSize: number;
+  saved?: number;
+  connected: boolean;
+  gaps: { reason: string; count: number; examples: string[] }[];
 }
 
 export interface BridgeResponse {
@@ -37,6 +64,9 @@ export interface BridgeResponse {
   contentItems?: SearchItem[];
   stash?: SearchItem[];
   copied?: number;
+  scripts?: FileScript[];
+  run?: ScriptRun;
+  indexes?: IndexStatus[];
   error?: string;
 }
 
@@ -90,7 +120,10 @@ type Request =
   | { type: "search"; query: string; filter?: string; limit: number; content: boolean }
   | { type: "filters" }
   | { type: "stash" }
-  | { type: "copyFiles"; paths: string[] };
+  | { type: "copyFiles"; paths: string[] }
+  | { type: "scripts"; paths: string[] }
+  | { type: "runScript"; script: string; paths: string[] }
+  | { type: "status" };
 
 /** Asks the running Oil Find to change its stash, without bringing it to the front. */
 export function updateStash(application: string, action: "add" | "remove", paths: string[]): Promise<void>;
@@ -110,6 +143,7 @@ export function startBridge(
   executable: string,
   onResponse: (response: BridgeResponse) => void,
   onError: (message: string) => void,
+  timeoutMs = 30_000,
 ) {
   const child = spawn(executable, ["--raycast-search"], { stdio: ["pipe", "pipe", "ignore"] });
   const output = createInterface({ input: child.stdout });
@@ -141,7 +175,7 @@ export function startBridge(
     busy = true;
     child.stdin.write(line + "\n");
     // The first request loads the whole index, which can take a while on large disks.
-    timeout = setTimeout(() => fail("Oil Find did not respond. Retry, or update Oil Find."), 30_000);
+    timeout = setTimeout(() => fail("Oil Find did not respond. Retry, or update Oil Find."), timeoutMs);
   }
 
   output.on("line", (line) => {
@@ -173,4 +207,21 @@ export function startBridge(
     },
     close,
   };
+}
+
+/** Starts a bridge for a single request, for AI tools and one-off actions. */
+export function requestOnce(executable: string, request: Request, timeoutMs?: number): Promise<BridgeResponse> {
+  return new Promise((resolve, reject) => {
+    const session = startBridge(
+      executable,
+      (response) => {
+        if (response.contentItems) return;
+        session.close();
+        resolve(response);
+      },
+      (message) => reject(new Error(message)),
+      timeoutMs,
+    );
+    session.send(1, request);
+  });
 }

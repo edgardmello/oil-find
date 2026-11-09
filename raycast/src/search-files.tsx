@@ -2,6 +2,7 @@ import {
   Action,
   ActionPanel,
   Application,
+  Color,
   Icon,
   Image,
   LaunchProps,
@@ -18,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { BridgeResponse, SearchFilter, SearchItem, findApplication, startBridge, updateStash } from "./bridge";
 import { displayPath, folderQuery } from "./paths";
 import { ItemDetail, formatDate, formatSize } from "./preview";
+import { ScriptsSubmenu } from "./scripts";
 
 interface Preferences {
   applicationPath?: string;
@@ -60,6 +62,7 @@ const filterIcons: Record<string, Image.ImageLike> = {
 };
 
 function filterIcon(filter: SearchFilter) {
+  if (filter.section === "drive") return filter.connected ? Icon.HardDrive : { source: Icon.HardDrive, tintColor: Color.SecondaryText };
   const key = filter.section === "kind" ? filter.id.slice("kind:".length) : filter.symbol;
   return (key && filterIcons[key]) || Icon.Filter;
 }
@@ -69,6 +72,7 @@ const sections: { id: SearchFilter["section"]; title: string }[] = [
   { id: "quick", title: "Quick Filters" },
   { id: "folder", title: "Folders" },
   { id: "saved", title: "Saved Filters" },
+  { id: "drive", title: "Drives" },
 ];
 
 const errorMessages: Record<string, string> = {
@@ -87,6 +91,7 @@ function oilFindURL(query: string, filter: SearchFilter | undefined) {
   const parameters = new URLSearchParams();
   parameters.set("q", filter?.query ? `${filter.query} ${query}`.trim() : query);
   if (filter?.section === "kind") parameters.set("filter", filter.id.slice("kind:".length));
+  else if (filter?.section === "drive") parameters.set("volume", filter.id.slice("drive:".length));
   else if (filter) parameters.set("library", filter.id.slice("library:".length));
   return "oilfind://search?" + parameters.toString().replace(/\+/g, "%20");
 }
@@ -113,6 +118,7 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
   const [removed, setRemoved] = useState<Set<string>>(new Set());
   const request = useRef(0);
   const application = useRef<string | undefined>(undefined);
+  const executable = useRef<string | undefined>(undefined);
   const bridge = useRef<ReturnType<typeof startBridge> | undefined>(undefined);
 
   useEffect(() => {
@@ -127,6 +133,7 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
       return;
     }
     application.current = target.application;
+    executable.current = target.executable;
     const session = startBridge(
       target.executable,
       (response: BridgeResponse) => {
@@ -194,11 +201,15 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
     />
   );
 
-  async function stash(item: SearchItem) {
+  async function stash(...stashed: SearchItem[]) {
     if (!application.current) return;
     try {
-      await updateStash(application.current, "add", [item.path]);
-      await showToast({ style: Toast.Style.Success, title: "Added to Oil Find Stash", message: basename(item.path) });
+      await updateStash(application.current, "add", stashed.map((item) => item.path));
+      await showToast({
+        style: Toast.Style.Success,
+        title: "Added to Oil Find Stash",
+        message: stashed.length === 1 ? basename(stashed[0].path) : `${stashed.length} files`,
+      });
     } catch {
       await showToast({ style: Toast.Style.Failure, title: "Could not reach Oil Find" });
     }
@@ -213,6 +224,17 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
     const folder = item.isFolder ? item.path : dirname(item.path);
     const terminal = preferences.terminalApp;
     const editor = preferences.editorApp;
+    if (item.offline) {
+      return (
+        <ActionPanel>
+          <ActionPanel.Section title={`${activeFilter?.name ?? "This drive"} is not connected`}>
+            {oilFind}
+            <Action.CopyToClipboard title="Copy Path" content={item.path} />
+            <Action.CopyToClipboard title="Copy Name" content={name} />
+          </ActionPanel.Section>
+        </ActionPanel>
+      );
+    }
     return (
       <ActionPanel>
         <ActionPanel.Section>
@@ -241,6 +263,15 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
             shortcut={{ modifiers: ["cmd"], key: "s" }}
             onAction={() => stash(item)}
           />
+          {visible.length + visibleContent.length > 1 && (
+            <Action
+              title={`Add All ${visible.length + visibleContent.length} Results to Stash`}
+              icon={Icon.Tray}
+              shortcut={{ modifiers: ["cmd", "opt"], key: "s" }}
+              onAction={() => stash(...[...visible, ...visibleContent].filter((result) => !result.offline))}
+            />
+          )}
+          <ScriptsSubmenu executable={executable.current} paths={[item.path]} />
           {quicklinkAction}
         </ActionPanel.Section>
         <ActionPanel.Section title="Copy">
@@ -315,17 +346,18 @@ export default function SearchFiles(props: LaunchProps<{ launchContext?: LaunchC
         key={item.path}
         title={basename(item.path) || item.path}
         subtitle={showingDetail ? undefined : (item.snippet ?? displayPath(item.path))}
-        icon={{ fileIcon: item.path }}
-        quickLook={{ path: item.path, name: basename(item.path) }}
+        icon={item.offline ? (item.isFolder ? Icon.Folder : Icon.Document) : { fileIcon: item.path }}
+        quickLook={item.offline ? undefined : { path: item.path, name: basename(item.path) }}
         accessories={
           showingDetail
             ? undefined
             : [
+                ...(item.offline ? [{ tag: { value: "Offline", color: Color.SecondaryText } }] : []),
                 ...(item.isFolder ? [] : [{ text: formatSize(item.size) }]),
                 { date: new Date(item.modified * 1000), tooltip: `Modified ${formatDate(item.modified)}` },
               ]
         }
-        detail={showingDetail ? <ItemDetail item={item} /> : undefined}
+        detail={showingDetail && !item.offline ? <ItemDetail item={item} /> : undefined}
         actions={itemActions(item)}
       />
     );

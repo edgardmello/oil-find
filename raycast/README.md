@@ -5,11 +5,14 @@ Search the Oil Find index from Raycast. The extension talks to the Oil Find app 
 ## What it does
 
 - **Content matches**: when Oil Find's content search is on, files whose text matches appear in their own section under the filename results, with the matching line. Turn it off with the Contents preference.
-- **Filter menu** next to the search bar: file kinds, plus every quick filter, folder filter and saved filter from Oil Find, under the same names.
+- **Filter menu** next to the search bar: file kinds, every quick filter, folder filter and saved filter from Oil Find under the same names, and each external drive Oil Find knows. A disconnected drive is searched through its saved catalog; its results are marked Offline.
 - **Details panel** (⌘I): image, text and folder previews with size, dates and kind.
 - **Actions**, close to the Cling extension: Open, Show in Finder, Open With (⌘O), Quick Look (⌘Y), Copy Path, Name or File, Paste Path in the frontmost app, Open Folder in Terminal (⌘T), Open in Editor (⌘E, once an editor is set), Move to Trash (⌃X).
-- **Oil Find actions**: Open Search in Oil Find (⇧⌘O) opens the panel with the same text and filter, Search in This Folder (⌘F) narrows the search with `in:`, Save as Quicklink (⇧⌘L) keeps a query and filter as a Raycast quicklink, and Add to Oil Find Stash (⌘S) puts the file in the Oil Find stash.
-- **Oil Find Stash** command: the stashed files, with Copy All Files (⇧⌘C) to paste them anywhere at once, Remove from Stash (⌃X), Clear Stash and Show Stash in Oil Find (⇧⌘O).
+- **Oil Find actions**: Open Search in Oil Find (⇧⌘O) opens the panel with the same text and filter, Search in This Folder (⌘F) narrows the search with `in:`, Save as Quicklink (⇧⌘L) keeps a query and filter as a Raycast quicklink, Add to Oil Find Stash (⌘S) puts the file in the Oil Find stash, Add All Results to Stash (⌥⌘S) stashes the whole list, and Run Oil Find Script (⇧⌘R) runs the file scripts set up in Oil Find whose rules accept the file, then shows their output.
+- **Oil Find Stash** command: the stashed files, with Copy All Files (⇧⌘C) to paste them anywhere at once, Run Script on All Files (⇧⌘R), Remove from Stash (⌃X), Clear Stash and Show Stash in Oil Find (⇧⌘O). Raycast lists have no multiple selection, so the stash is how you act on several files together.
+- **Oil Find Index Status** command: item count, last save and size of each index, the folders Oil Find could not read and the other coverage gaps from Oil Find's "Not Covered" summary, with a shortcut to Full Disk Access.
+- **Raycast AI**: `@oil-find` gives Raycast AI a Search Files tool that writes Oil Find queries (`*.pdf dm:lastweek`, `kind:image in:~/Pictures`) and gets back paths, kinds, sizes, dates and content matches.
+- **Fallback command**: add Search Files with Oil Find to Raycast's fallback commands (Raycast Settings → Extensions → Fallback Commands) to search Oil Find with whatever you typed in the root search.
 
 With an empty search field the list shows recent files, like the Oil Find panel.
 
@@ -33,4 +36,4 @@ The extension uses, in order, the Oil Find App Path preference, an Oil Find that
 
 ## Limits
 
-The extension searches the startup volume index. External drives stay in the Oil Find panel; Open Search in Oil Find (⇧⌘O) takes you there. Folders Oil Find has no access to, such as Downloads without Full Disk Access, are not in the index.
+Content matches cover the startup volume only, like in Oil Find. File scripts only run if they are in Oil Find's script list, never from a path the extension sends. Folders Oil Find has no access to, such as Downloads without Full Disk Access, are not in the index.

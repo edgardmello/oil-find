@@ -28,7 +28,7 @@
 		</dict>
 	</array>
 	<key>OilFindRaycastProtocol</key>
-	<integer>3</integer>
+	<integer>4</integer>
 	<key>CFBundleVersion</key>
 	<string>16</string>
 	<key>LSApplicationCategoryType</key>

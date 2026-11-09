@@ -26,6 +26,13 @@
       "subtitle": "Oil Find",
       "description": "See the files kept in the Oil Find stash, copy them all at once, open them or remove them.",
       "mode": "view"
+    },
+    {
+      "name": "index-status",
+      "title": "Oil Find Index Status",
+      "subtitle": "Oil Find",
+      "description": "See what Oil Find has indexed on each volume and which folders it cannot read.",
+      "mode": "view"
     }
   ],
   "preferences": [
@@ -82,5 +89,46 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "typescript": "^5.9.0"
+  },
+  "tools": [
+    {
+      "name": "search-files",
+      "title": "Search Files",
+      "description": "Search files and folders on this Mac with the Oil Find index, by name, path, kind, date, size or contents. Returns paths with kind, size and modification date."
+    }
+  ],
+  "ai": {
+    "instructions": "Use Oil Find's query syntax instead of natural language in the query: for example `*.pdf contrato dm:lastweek` or `kind:image in:~/Pictures dm:month`. Prefer several narrow searches over one broad one. Mention file paths with ~ for the home folder.",
+    "evals": [
+      {
+        "input": "@oil-find find the PDFs I changed last week",
+        "mocks": {
+          "search-files": {
+            "totalNameMatches": 1,
+            "results": [
+              {
+                "path": "/Users/me/Documents/contrato.pdf",
+                "kind": "doc",
+                "size": 120000,
+                "modified": "2026-11-03T10:00:00.000Z"
+              }
+            ],
+            "contentMatches": []
+          }
+        },
+        "expected": [
+          {
+            "callsTool": {
+              "name": "search-files",
+              "arguments": {
+                "query": {
+                  "includes": "pdf"
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
   }
 }

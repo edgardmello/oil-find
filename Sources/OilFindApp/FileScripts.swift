@@ -81,7 +81,8 @@ final class FileScriptRun {
         return run
     }
 
-    private func execute(_ script: FileScript, files: [URL]) -> Result {
+    /// Runs synchronously; `start` wraps this for the panel.
+    func execute(_ script: FileScript, files: [URL]) -> Result {
         let stopped = Result(outcome: .stopped, output: "", truncated: false)
         guard !isStopping else { return stopped }
         guard !files.isEmpty, files.allSatisfy({ $0.isFileURL && (try? $0.checkResourceIsReachable()) == true }) else {
