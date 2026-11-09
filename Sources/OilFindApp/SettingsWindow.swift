@@ -503,7 +503,7 @@ private struct SettingsForm: View {
                         .padding(.bottom, 8)
                 }
                 if page == .filters {
-                    SavedFilterSettings(preferences: model.preferences)
+                    SavedFilterSettings(preferences: model.preferences, window: window)
                 } else {
                     Form { pageContent }
                     .formStyle(.grouped)
@@ -528,6 +528,13 @@ private struct SettingsForm: View {
                     Toggle(L10n.text("settings.login"), isOn: Binding(get: { model.launchAtLogin }, set: model.setLogin))
                     if let error = model.loginError { hint(error).foregroundStyle(.red) }
                 }
+            }
+            Section(L10n.text("settings.general.window")) {
+                Picker(L10n.text("settings.general.display"), selection: preference("openOnPointerDisplay", default: true)) {
+                    Text(L10n.text("settings.general.pointerDisplay")).tag(true)
+                    Text(L10n.text("settings.general.primaryDisplay")).tag(false)
+                }
+                option("settings.general.keepOpen", help: "settings.general.keepOpenHelp", value: preference("keepPanelOpenOnDefocus"))
             }
             Section {
                 HStack {

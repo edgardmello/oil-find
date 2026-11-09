@@ -603,6 +603,10 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
     }
 
+    var opensOnPointerDisplay: Bool {
+        preferences.object(forKey: "openOnPointerDisplay") as? Bool ?? true
+    }
+
     func preparePanelAppearance() {
         if !snapshot {
             setInlinePreviewVisible(preferences.bool(forKey: "defaultSidePreview"), resize: false)
@@ -1562,6 +1566,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     func menuWillOpen(_ menu: NSMenu) { menuTracking = true }
     func menuDidClose(_ menu: NSMenu) { menuTracking = false; hideIfInactive() }
     private func hideIfInactive() {
+        guard !preferences.bool(forKey: "keepPanelOpenOnDefocus") else { return }
         if CFAbsoluteTimeGetCurrent() - quickLookDismissTime < 0.4 { return }
         if view.window?.isKeyWindow == false && !quickLook.isVisible && !menuTracking && !dragging { hidePanel?() }
     }
