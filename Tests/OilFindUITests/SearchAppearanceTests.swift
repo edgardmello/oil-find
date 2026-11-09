@@ -89,8 +89,9 @@ final class SearchAppearanceTests: XCTestCase {
         let config = IndexConfig(rootPath: root.path)
         let store = IndexStore(scan: try XCTUnwrap(Scanner(config: config, threads: 1).run()), config: config)
         let controller = SearchViewController(snapshot: false, preferences: preferences)
+        controller.additionalSources = { [SearchSource(id: "startup", displayName: "", isOnline: true, store: store)] }
         try controller.prepareSnapshot(state: "results", query: "report", options: .init(), store: store, selection: 0)
-        XCTAssertNotNil(controller.results.selectedItem)
+        XCTAssertEqual(controller.results.result?.count, 1)
 
         preferences.set(3, forKey: "minimumSearchLength")
         controller.searchField.text = "re"
