@@ -233,10 +233,10 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
         }
         if canShareWithDroplr?() == true {
             menu.addItem(.separator())
-            let item = menu.addItem(withTitle: L10n.text("droplr.prepare"), action: #selector(stashMenuAction(_:)), keyEquivalent: "")
+            let item = menu.addItem(withTitle: L10n.text("droplr.upload"), action: #selector(stashMenuAction(_:)), keyEquivalent: "")
             item.target = self
             item.tag = 6
-            item.isEnabled = !selection.isEmpty && selection.allSatisfy { metadata[$0.id] != nil }
+            item.isEnabled = selection.count == 1 && selection.allSatisfy { metadata[$0.id] != nil }
         }
         return menu
     }

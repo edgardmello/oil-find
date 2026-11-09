@@ -32,7 +32,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private let snapshot: Bool
     private let preferences: UserDefaults
     private let filePaste = FilePasteHandoff()
-    private let droplrShare = EncryptedDroplrShare()
+    private let droplrShare = DroplrUpload()
     private lazy var fileStash = FileStash(preferences: preferences)
     private lazy var scriptWindow = FileScriptWindow()
     private let accessories = SearchAccessoryBar(frame: .zero)
@@ -1194,9 +1194,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         copyFiles.target = self
         copyFiles.isEnabled = !selectedOnlineItems.isEmpty && selectedOnlineItems.count == results.selectedItems.count
         if droplrShare.isAvailable, results.selectedItem != nil {
-            let share = menu.addItem(withTitle: L10n.text("droplr.prepare"), action: #selector(prepareSelectedDroplrShare), keyEquivalent: "")
+            let share = menu.addItem(withTitle: L10n.text("droplr.upload"), action: #selector(prepareSelectedDroplrShare), keyEquivalent: "")
             share.target = self
-            share.isEnabled = copyFiles.isEnabled
+            share.isEnabled = copyFiles.isEnabled && results.selectedItems.count == 1
         }
         let duplicate = menu.addItem(withTitle: L10n.text("ctx.duplicate"), action: #selector(duplicateSelectedFiles), keyEquivalent: "")
         duplicate.target = self
@@ -1231,9 +1231,20 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     private func prepareDroplrShare(_ urls: [URL]) {
+        guard urls.count == 1, let file = urls.first else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.droplrShare.prepare(urls) { self.hidePanel?() }
+            self.droplrShare.upload(file, dismiss: { self.hidePanel?() }) { failure in
+                NSApp.activate()
+                let alert = NSAlert()
+                alert.messageText = L10n.text("droplr.upload")
+                alert.informativeText = L10n.text("droplr." + failure.rawValue)
+                alert.addButton(withTitle: L10n.text("droplr.reveal"))
+                alert.addButton(withTitle: L10n.text("droplr.close"))
+                if alert.runModal() == .alertFirstButtonReturn {
+                    NSWorkspace.shared.activateFileViewerSelecting([file])
+                }
+            }
         }
     }
 
