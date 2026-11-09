@@ -324,6 +324,24 @@ private struct SettingsForm: View {
     var appExtension: ApplicationExtension?
     var externalDrives: ExternalDriveCatalog
     var window: () -> NSWindow?
+    @State private var shortcutQuery = ""
+
+    private var shortcutRows: [(action: StashShortcut, title: String)] {
+        StashShortcut.allCases.compactMap { action in
+            if StashShortcut.scripts.contains(action) {
+                guard model.fileScripts.indices.contains(action.slot) else { return nil }
+                return (action, model.fileScripts[action.slot].name)
+            }
+            return (action, action.settingsTitle)
+        }
+    }
+
+    private func matchesShortcut(_ title: String, chord: StashShortcut.Chord) -> Bool {
+        let query = shortcutQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let symbols = Shortcut.symbols(keyCode: chord.keyCode, modifiers: chord.modifiers)
+        return query.isEmpty || title.localizedStandardContains(query) || symbols.localizedStandardContains(query)
+    }
+
     var body: some View {
         Form {
             Section(L10n.text("settings.general")) {
@@ -337,17 +355,29 @@ private struct SettingsForm: View {
                     if let error = model.loginError { hint(error).foregroundStyle(.red) }
                 }
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        Text(L10n.text("settings.shortcut")); Spacer()
-                        ShortcutRecorder(model: model).frame(width: 120, height: 24)
-                    }
                     DisclosureGroup(L10n.text("syntax.keys")) {
-                        ForEach(StashShortcut.allCases.filter { !StashShortcut.scripts.contains($0) }, id: \.self) { target in
+                        TextField(L10n.text("settings.filterShortcuts"), text: $shortcutQuery)
+                            .textFieldStyle(.roundedBorder)
+                        let matches = shortcutRows.filter { row in
+                            matchesShortcut(row.title, chord: model.stashShortcuts[row.action] ?? row.action.defaultChord)
+                        }
+                        let global = matchesShortcut(L10n.text("settings.shortcut"),
+                                                     chord: .init(keyCode: model.keyCode, modifiers: model.modifiers))
+                        if global {
                             HStack {
-                                Text(target.settingsTitle)
-                                Spacer()
-                                ShortcutRecorder(model: model, stashShortcut: target).frame(width: 120, height: 24)
+                                Text(L10n.text("settings.shortcut")); Spacer()
+                                ShortcutRecorder(model: model).frame(width: 120, height: 24)
                             }
+                        }
+                        ForEach(matches, id: \.action) { row in
+                            HStack {
+                                Text(row.title)
+                                Spacer()
+                                ShortcutRecorder(model: model, stashShortcut: row.action).frame(width: 120, height: 24)
+                            }
+                        }
+                        if matches.isEmpty && !global {
+                            Text(L10n.text("settings.noShortcutMatches")).foregroundStyle(.secondary)
                         }
                     }
                     hint(L10n.text("settings.stashShortcutHint"))

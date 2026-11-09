@@ -38,7 +38,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private let accessories = SearchAccessoryBar(frame: .zero)
     private var stashExpanded = false
     private var copyingStash = false
-    private lazy var stashWindow = StashWindow(stash: fileStash)
+    private lazy var stashWindow = StashWindow(stash: fileStash, preferences: preferences)
     private let queue = DispatchQueue(label: "com.oiloil.find.search", qos: .userInteractive)
     private let fileTransferQueue = DispatchQueue(label: "com.oiloil.find.fileTransfer", qos: .userInitiated)
     private let coverageQueue = DispatchQueue(label: "com.oiloil.find.searchCoverage", qos: .utility)
@@ -152,6 +152,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         syntaxScroll.isHidden = true
         inlinePreview.isHidden = true
         syntax.shortcutPreferences = preferences
+        accessories.setShortcutPreferences(preferences)
         refreshShortcuts()
         syntax.onExample = { [weak self] example in
             guard let self else { return }; self.setBrowsing(false); self.searchField.text = example; self.toggleSyntax(false); self.searchField.focus(); self.startSearch()
@@ -954,6 +955,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         switch action {
         case .add: stashSelection()
         case .show: toggleStash()
+        case .remove: return false
         case .paste: pasteSelectionInPreviousApp()
         case .actions: showActions(anchoredTo: footer)
         case .preview: previewSelected()
@@ -1366,6 +1368,11 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                 self.footer.text = L10n.text("filePaste." + reason.rawValue)
             } else { NSSound.beep() }
         })
+    }
+
+    func toggleStashWindow() {
+        if stashWindow.window?.isVisible == true { stashWindow.close() }
+        else { showStash() }
     }
 
     func showStash() {

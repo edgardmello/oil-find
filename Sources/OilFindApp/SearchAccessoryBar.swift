@@ -39,6 +39,8 @@ final class SearchAccessoryBar: FlippedView {
         stashTable.revealAddedFiles(count)
     }
 
+    func setShortcutPreferences(_ preferences: UserDefaults) { stashTable.shortcutPreferences = preferences }
+
     func handleStashKey(_ event: NSEvent, action: StashShortcut?) -> Bool? {
         isHidden ? nil : stashTable.handleKey(event, action: action)
     }
