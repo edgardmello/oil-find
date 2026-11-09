@@ -701,7 +701,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         model.additionalSources = { [weak appExtension, weak externalDrives] in
             (externalDrives?.searchSources() ?? []) + (appExtension?.searchSources() ?? [])
         }
-        let window = SettingsWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 560), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        let initialSize = NSSize(width: 780, height: 560)
+        let window = SettingsWindow(contentRect: NSRect(origin: .zero, size: initialSize), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.contentMinSize = NSSize(width: 680, height: 440)
         window.settingsModel = model
         window.title = L10n.text("settings.title"); window.isReleasedWhenClosed = false
@@ -712,6 +713,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let hosting = NSHostingController(rootView: settings)
         hosting.sizingOptions = []
         window.contentViewController = hosting
+        window.setContentSize(initialSize)
         model.onContentChange = { [weak self] in self?.refreshTitle() }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
