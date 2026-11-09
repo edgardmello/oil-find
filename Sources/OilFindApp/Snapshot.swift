@@ -9,7 +9,7 @@ enum SnapshotError: Error, CustomStringConvertible {
 #if DEBUG
 enum Snapshot {
     static func run(_ arguments: [String], appExtension: ApplicationExtension? = nil, externalDrives: ExternalDriveCatalog = ExternalDriveCatalog()) throws {
-        let allowed = Set(["--snapshot", "--state", "--query", "--filter", "--sort", "--select", "--appearance", "--db", "--settings-scroll", "--language", "--coverage", "--update-notes", "--update-scroll", "--topic-index"])
+        let allowed = Set(["--snapshot", "--state", "--query", "--filter", "--sort", "--select", "--appearance", "--db", "--settings-scroll", "--settings-page", "--language", "--coverage", "--update-notes", "--update-scroll", "--topic-index"])
         var values: [String: String] = [:], i = 0, granted = false, inlinePreview = false, compactTable = false
         while i < arguments.count {
             if arguments[i] == "--compact-table" { compactTable = true; i += 1; continue }
@@ -121,7 +121,12 @@ enum Snapshot {
         if state == "settings" {
             let model = SettingsModel(snapshotStore: store, snapshot: true, topics: topics)
             if values["--coverage"] == "sample" { model.expandedCoverage = ["noAccess", "scope"] }
-            let controller = SettingsWindowController(model: model, appExtension: appExtension, externalDrives: externalDrives)
+            let pageName = values["--settings-page"] ?? SettingsPage.general.rawValue
+            guard let page = SettingsPage(rawValue: pageName), page != .extensions || appExtension != nil else {
+                throw SnapshotError.failed("Invalid settings page: \(pageName)")
+            }
+            let controller = SettingsWindowController(model: model, appExtension: appExtension,
+                                                      externalDrives: externalDrives, initialPage: page)
             guard let window = controller.window, let view = window.contentView else { throw SnapshotError.failed("Cannot create settings view") }
             window.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
             view.layoutSubtreeIfNeeded()
@@ -133,7 +138,7 @@ enum Snapshot {
                 func scrollViews(_ view: NSView) -> [NSScrollView] {
                     (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap(scrollViews)
                 }
-                if let scroll = scrollViews(view).first, let document = scroll.documentView {
+                if let scroll = scrollViews(view).max(by: { $0.bounds.width < $1.bounds.width }), let document = scroll.documentView {
                     let maximum = max(0, document.bounds.height - scroll.contentView.bounds.height)
                     scroll.contentView.scroll(to: NSPoint(x: 0, y: document.isFlipped ? maximum * fraction : maximum * (1 - fraction)))
                     scroll.reflectScrolledClipView(scroll.contentView)
