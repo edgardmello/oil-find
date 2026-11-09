@@ -23,6 +23,8 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
     private let icons = IconProvider()
     var onCopyAll: (() -> Void)?
     var onOpenWindow: (() -> Void)?
+    var canShareWithDroplr: (() -> Bool)?
+    var onShareWithDroplr: (([URL]) -> Void)?
     private var files: [StashedFile] = []
     private var metadata: [UUID: Metadata] = [:]
     private var generation = 0
@@ -117,6 +119,11 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
                 self.table.reloadData()
             }
         }
+    }
+
+    func revealAddedFiles(_ count: Int) {
+        guard count > 0, count <= files.count else { return }
+        table.scrollRowToVisible(files.count - count)
     }
 
     private var selection: [StashedFile] { table.selectedRowIndexes.compactMap { files.indices.contains($0) ? files[$0] : nil } }
@@ -224,6 +231,13 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
             item.tag = index
             item.isEnabled = index >= 3 || selection.allSatisfy { metadata[$0.id] != nil }
         }
+        if canShareWithDroplr?() == true {
+            menu.addItem(.separator())
+            let item = menu.addItem(withTitle: L10n.text("droplr.prepare"), action: #selector(stashMenuAction(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = 6
+            item.isEnabled = !selection.isEmpty && selection.allSatisfy { metadata[$0.id] != nil }
+        }
         return menu
     }
 
@@ -252,6 +266,9 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text.joined(separator: "\n"), forType: .string)
         case 5: onRemove?(Set(files.map(\.id)))
+        case 6:
+            guard available.count == files.count else { return }
+            onShareWithDroplr?(available)
         default: break
         }
     }
