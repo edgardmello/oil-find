@@ -135,11 +135,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private var sourceCaches: [String: SearchCache] = [:]
     private var sourceCacheStores: [String: ObjectIdentifier] = [:]
     private var folderScope: String?
+    private var activeLibraryFilter: QuickFilter?
     private var savedCriteria: Query.SavedCriteria?
     private var volumeScope: String?
     private lazy var fuzzyNames = !snapshot && preferences.bool(forKey: "fuzzyNames")
     private var hiddenOnly = false
-    private var sortingRecent: Bool { !hiddenOnly && folderScope == nil && savedCriteria == nil && searchField.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var sortingRecent: Bool { !hiddenOnly && folderScope == nil && savedCriteria == nil && activeLibraryFilter == nil && searchField.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var scopedSources: [SearchSource] {
         guard let volumeScope else { return searchSources }
         let sources = searchSources
@@ -360,6 +361,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     func applySearchLink(_ link: SearchLink) {
         _ = view
         searchField.text = link.query
+        activeLibraryFilter = nil
         savedCriteria = nil
         folderScope = link.folder
         hiddenOnly = false
@@ -467,6 +469,20 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             item.submenu = refine
             menu.addItem(.separator())
         }
+        let library = QuickFilter.library(in: preferences)
+        for group in QuickFilter.Group.allCases {
+            let groupMenu = NSMenu()
+            for filter in library where filter.group == group {
+                let item = groupMenu.addItem(withTitle: filter.name, action: #selector(applyLibraryFilter(_:)), keyEquivalent: "")
+                item.target = self
+                item.image = Theme.symbol(filter.icon, size: 12, weight: .regular)
+                item.representedObject = filter
+            }
+            if !groupMenu.items.isEmpty {
+                menu.addItem(withTitle: group.title, action: nil, keyEquivalent: "").submenu = groupMenu
+            }
+        }
+        if !library.isEmpty { menu.addItem(.separator()) }
         let save = menu.addItem(withTitle: L10n.text("quickFilter.save"), action: #selector(saveQuickFilter), keyEquivalent: "")
         save.target = self
         if !saved.isEmpty {
@@ -498,7 +514,23 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private func applyQuickFilter(at index: Int, restoreQuery: Bool = true) -> Bool {
         let saved = QuickFilter.load(from: preferences)
         guard saved.indices.contains(index) else { return false }
-        let filter = saved[index]
+        applyFilter(saved[index], restoreQuery: restoreQuery)
+        return true
+    }
+
+    @objc private func applyLibraryFilter(_ item: NSMenuItem) {
+        guard let filter = item.representedObject as? QuickFilter else { return }
+        if activeLibraryFilter == filter {
+            clearLibraryFilter()
+            scopeChanged()
+        } else {
+            applyFilter(filter, restoreQuery: false)
+        }
+    }
+
+    private func applyFilter(_ filter: QuickFilter, restoreQuery: Bool) {
+        activeLibraryFilter = filter.group != nil || filter.prepend != nil || filter.append != nil || filter.match != nil
+            || filter.expiresAfter != nil ? filter : nil
         if restoreQuery { searchField.text = filter.query }
         savedCriteria = filter.criteria
         folderScope = filter.folder
@@ -514,7 +546,17 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             filters.options = options
         }
         scopeChanged()
-        return true
+    }
+
+    private func clearLibraryFilter() {
+        activeLibraryFilter = nil
+        savedCriteria = nil
+        folderScope = nil
+        volumeScope = nil
+        hiddenOnly = false
+        fuzzyNames = preferences.bool(forKey: "fuzzyNames")
+        filters.options = SettingsPreferences.searchOptions(in: preferences, recent: sortingRecent)
+        filters.select(0, notify: false)
     }
 
     @objc private func removeQuickFilter(_ item: NSMenuItem) {
@@ -565,6 +607,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     @objc private func scopeToSelection() {
         guard let item = results.selectedItem, !multipleSelected else { return }
+        activeLibraryFilter = nil
         savedCriteria = nil
         folderScope = item.flags & SiftFlag.dir != 0 ? item.path : item.parentPath
         searchField.text = ""
@@ -594,7 +637,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if let folderScope {
             chips.append(((folderScope as NSString).lastPathComponent + " ×", { [weak self] in self?.clearFolderScope() }))
         }
-        if savedCriteria != nil {
+        if let filter = activeLibraryFilter {
+            chips.append((filter.name + " ×", { [weak self] in
+                self?.clearLibraryFilter()
+                self?.scopeChanged()
+            }))
+        } else if savedCriteria != nil {
             chips.append((L10n.text("settings.filters.criteria") + " ×", { [weak self] in
                 self?.savedCriteria = nil
                 self?.scopeChanged()
@@ -606,7 +654,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if chips.count > 1 {
             chips.append((L10n.text("panel.clearFilters"), { [weak self] in
                 guard let self else { return }
-                self.volumeScope = nil; self.folderScope = nil; self.savedCriteria = nil; self.hiddenOnly = false
+                self.volumeScope = nil; self.folderScope = nil; self.savedCriteria = nil; self.activeLibraryFilter = nil; self.hiddenOnly = false
                 self.filters.select(0, notify: false)
                 self.scopeChanged()
             }))
@@ -690,7 +738,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     private func syncBarPresentation(resize: Bool = true) {
         let collapsed = searchInterface == .bar && !barExpandedManually && !syntaxVisible
-            && searchField.text.isEmpty && folderScope == nil && savedCriteria == nil
+            && searchField.text.isEmpty && folderScope == nil && savedCriteria == nil && activeLibraryFilter == nil
             && volumeScope == nil && !hiddenOnly && filters.options.kind == nil && !filters.additionalSelected
         guard collapsed != barCollapsed else { return }
         barCollapsed = collapsed
@@ -750,12 +798,20 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     func preparePanelAppearance() {
         if !snapshot {
+            if let filter = activeLibraryFilter, let lastHiddenAt {
+                let expiry = filter.expiresAfter ?? preferences.integer(forKey: QuickFilter.expiryKey)
+                if expiry > 0 && Date().timeIntervalSince(lastHiddenAt) >= Double(expiry) {
+                    clearLibraryFilter()
+                    results.clear(preservingViewport: false)
+                }
+            }
             let delay = preferences.integer(forKey: "resetSearchAfter")
             if delay > 0, let lastHiddenAt, Date().timeIntervalSince(lastHiddenAt) >= Double(delay) {
                 searchField.text = ""
                 folderScope = nil
                 volumeScope = nil
                 savedCriteria = nil
+                activeLibraryFilter = nil
                 hiddenOnly = false
                 fuzzyNames = preferences.bool(forKey: "fuzzyNames")
                 selectionAnchor = nil
@@ -875,7 +931,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let cancelled = { [generation] in !generation.current(token) }
         let supplementary = additionalOnly ? nil : supplementaryProvider?.prepareSearch(query, options: options, sources: sources, isCancelled: cancelled)
         let additional = additionalSearchProvider.flatMap { provider in
-            provider.isEnabled && (additionalOnly || options.kind == nil && folderScope == nil && savedCriteria == nil && volumeScope == nil && !hiddenOnly) ? provider.prepareSearch(query, isCancelled: cancelled) : nil
+            provider.isEnabled && (additionalOnly || options.kind == nil && folderScope == nil && savedCriteria == nil && activeLibraryFilter == nil && volumeScope == nil && !hiddenOnly) ? provider.prepareSearch(query, isCancelled: cancelled) : nil
         }
         additionalSearchFailed = false
         additionalPending = !refresh && additional != nil
@@ -982,6 +1038,16 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             var info = stat(); return path.withCString { stat($0, &info) == 0 }
         })
         if !filters.additionalSelected {
+            if let filter = activeLibraryFilter {
+                let restriction = filter.match == .files ? "file:" : (filter.match == .folders ? "folder:" : nil)
+                let fields = [filter.prepend, filter.group != nil ? filter.query : nil, filter.append, restriction]
+                for field in fields.compactMap({ $0 }).filter({ !$0.isEmpty }) {
+                    let extra = Query.parse(field, store: store)
+                    query.clauses.append(contentsOf: extra.clauses)
+                    query.raw += "\n" + extra.raw
+                    if !extra.diagnostics.isEmpty { query.diagnostics.append(contentsOf: extra.diagnostics) }
+                }
+            }
             if let folderScope { query = query.restricted(toFolder: folderScope) }
             if let savedCriteria { query = query.applying(savedCriteria) }
             if hiddenOnly { query = query.showingOnlyHiddenFiles() }
@@ -1041,7 +1107,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     private func explainEmptyResult(_ result: SearchPresentation) {
         guard !snapshot, result.total == 0, diagnostics.isEmpty, !filters.additionalSelected,
-              folderScope == nil, savedCriteria == nil, volumeScope == nil, !hiddenOnly, let path = explicitPath else { return }
+              folderScope == nil, savedCriteria == nil, activeLibraryFilter == nil, volumeScope == nil, !hiddenOnly, let path = explicitPath else { return }
         let sources = searchSources.filter { $0.id != "startup" }
         let manager = manager
         coverageQueue.async { [weak self, weak result] in
