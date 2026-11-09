@@ -22,6 +22,25 @@ private final class KeyHint: FlippedView {
     }
 }
 
+enum PinnedFileAction: String, CaseIterable {
+    case open, reveal, preview, copy
+
+    static let preferenceKey = "pinnedFileActions"
+    var title: String {
+        switch self {
+        case .open: return L10n.text("hint.open")
+        case .reveal: return L10n.text("ctx.reveal")
+        case .preview: return L10n.text("hint.preview")
+        case .copy: return L10n.text("ctx.copyFiles")
+        }
+    }
+
+    static func selected(in preferences: UserDefaults) -> [Self] {
+        let keys = preferences.stringArray(forKey: preferenceKey) ?? []
+        return allCases.filter { keys.contains($0.rawValue) }
+    }
+}
+
 final class FooterBar: FlippedView {
     struct Application {
         let url: URL
@@ -48,6 +67,21 @@ final class FooterBar: FlippedView {
     private let settings = SettingsButton()
     private let actions = ChromeButton("", style: .plain, size: 12, weight: .medium)
     private let stash = ChromeButton("", style: .plain, size: 12, weight: .medium)
+    private var pinnedButtons: [(PinnedFileAction, ChromeButton)] = []
+    var onPinnedAction: ((PinnedFileAction) -> Void)?
+
+    func setPinnedActions(_ actions: [PinnedFileAction]) {
+        guard actions != pinnedButtons.map({ $0.0 }) else { return }
+        pinnedButtons.forEach { $0.1.removeFromSuperview() }
+        pinnedButtons = actions.map { action in
+            let button = ChromeButton(action.title, style: .plain, size: 12, weight: .medium)
+            button.onPress = { [weak self] in self?.onPinnedAction?(action) }
+            addSubview(button)
+            return (action, button)
+        }
+        needsLayout = true
+    }
+
     var onActions: ((NSView) -> Void)?
     var onStash: (() -> Void)?
     var stashCount = 0 { didSet { refreshButtons() } }
@@ -186,6 +220,7 @@ final class FooterBar: FlippedView {
         inlinePreview.setAccessibilityLabel(title)
     }
     func localize() {
+        pinnedButtons.forEach { $0.1.title = $0.0.title }
         appChooser.title = L10n.text("footer.openWith")
         refreshButtons()
         updateInlinePreviewButton()
@@ -213,7 +248,15 @@ final class FooterBar: FlippedView {
             right = button.frame.minX
         }
         actions.isEnabled = actionable
-        let candidates = showActionHints && actionable && !warning ? Array(hints.prefix(fileActions ? 2 : 1)) + [syntax] : [syntax]
+        for (_, button) in pinnedButtons.reversed() {
+            let width = ceil(Theme.textWidth(button.title, font: button.font!)) + 16
+            button.isHidden = !actionable || !fileActions || right - width < 120
+            if !button.isHidden {
+                right -= width
+                button.frame = NSRect(x: right, y: 4, width: width, height: 26)
+            }
+        }
+        let candidates = pinnedButtons.isEmpty && showActionHints && actionable && !warning ? Array(hints.prefix(fileActions ? 2 : 1)) + [syntax] : [syntax]
         let hintWidth = candidates.reduce(0) { $0 + $1.desiredWidth + 8 }
         let visibleHints = right - hintWidth >= 175 ? candidates : []
         for hint in hints + [syntax] { hint.isHidden = !visibleHints.contains(hint) }

@@ -11,7 +11,9 @@ struct SavedFilterSettings: View {
     @State private var name = ""
     @State private var query = ""
     @State private var kind: UInt8?
-    @State private var folder: String?
+    @State private var folders: [String] = []
+    @State private var extensions = ""
+    @State private var exclusions: [String] = []
     @State private var hiddenOnly = false
     @State private var fuzzyNames = false
     @State private var sortKey: String?
@@ -34,17 +36,29 @@ struct SavedFilterSettings: View {
 
     private static let sortKeys: [SortKey] = [.relevance, .name, .modified, .size]
 
+    private var extensionList: [String] {
+        extensions.lowercased().split(whereSeparator: { $0.isWhitespace || $0 == "," || $0 == ";" }).map {
+            String($0).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        }
+    }
+
+    private var validExtensions: Bool {
+        extensionList.allSatisfy { (1...8).contains($0.utf8.count) && $0.utf8.allSatisfy { $0 < 128 } }
+    }
+
     private var draft: QuickFilter {
-        QuickFilter(name: validName, query: query, kind: kind, folder: folder,
+        let criteria = Query.SavedCriteria(folders: folders.count > 1 ? folders : [],
+                                           extensions: extensionList, exclusions: exclusions)
+        return QuickFilter(name: validName, query: query, kind: kind, folder: folders.count == 1 ? folders.first : nil,
                     volume: original?.volume, hiddenOnly: hiddenOnly,
                     fuzzyNames: fuzzyNames ? true : original?.fuzzyNames.map { _ in false },
-                    sort: sortKey.map { .init(key: $0, ascending: ascending) })
+                    sort: sortKey.map { .init(key: $0, ascending: ascending) }, criteria: criteria.isEmpty ? nil : criteria)
     }
 
     private var canSave: Bool {
         let hasSearch = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || kind != nil
-            || folder != nil || hiddenOnly || original?.volume != nil
-        return !validName.isEmpty && !duplicateName && draft != original && (original != nil || hasSearch)
+            || draft.folder != nil || draft.criteria != nil || hiddenOnly || original?.volume != nil
+        return validExtensions && !validName.isEmpty && !duplicateName && draft != original && (original != nil || hasSearch)
     }
 
     var body: some View {
@@ -81,19 +95,12 @@ struct SavedFilterSettings: View {
                             Text(L10n.text("filter." + name)).tag(UInt8(index + 1) as UInt8?)
                         }
                     }
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(L10n.text("settings.filters.folder"))
-                        Text(folder ?? L10n.text("settings.filters.anyFolder"))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1).truncationMode(.middle)
-                            .help(folder ?? "")
-                        HStack {
-                            Button(L10n.text("settings.filters.chooseFolder"), action: chooseFolder)
-                            if folder != nil {
-                                Button(L10n.text("settings.filters.clearFolder")) { folder = nil }
-                            }
-                        }
+                    pathList("settings.filters.folder", paths: $folders, allowFiles: false)
+                    TextField(L10n.text("settings.filters.extensions"), text: $extensions, prompt: Text("pdf, png"))
+                    if !validExtensions {
+                        Text(L10n.text("settings.filters.invalidExtensions")).foregroundStyle(.secondary)
                     }
+                    pathList("settings.filters.exclusions", paths: $exclusions, allowFiles: true)
                     if let volume = original?.volume {
                         LabeledContent(L10n.text("settings.filters.volume"), value: volume)
                     }
@@ -154,7 +161,10 @@ struct SavedFilterSettings: View {
         name = original?.name ?? ""
         query = original?.query ?? ""
         kind = original?.kind
-        folder = original?.folder
+        folders = original?.criteria?.folders ?? []
+        if let folder = original?.folder, !folders.contains(folder) { folders.insert(folder, at: 0) }
+        extensions = original?.criteria?.extensions.joined(separator: ", ") ?? ""
+        exclusions = original?.criteria?.exclusions ?? []
         hiddenOnly = original?.hiddenOnly ?? false
         fuzzyNames = original?.fuzzyNames ?? false
         sortKey = original?.sort?.key
@@ -162,14 +172,36 @@ struct SavedFilterSettings: View {
         conflict = false
     }
 
-    private func chooseFolder() {
-        guard let window = window() else { return }
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.directoryURL = folder.map { URL(fileURLWithPath: $0, isDirectory: true) }
-        panel.beginSheetModal(for: window) { response in
-            if response == .OK { folder = panel.url?.path }
+    private func pathList(_ title: String, paths: Binding<[String]>, allowFiles: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L10n.text(title))
+            ForEach(paths.wrappedValue, id: \.self) { path in
+                HStack {
+                    Text((path as NSString).abbreviatingWithTildeInPath)
+                        .lineLimit(1).truncationMode(.middle).help(path)
+                    Spacer()
+                    Button {
+                        paths.wrappedValue.removeAll { $0 == path }
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(L10n.text("settings.filters.removePath", path))
+                }
+            }
+            Button(L10n.text(allowFiles ? "settings.addFolder" : "settings.filters.chooseFolder")) {
+                guard let window = window() else { return }
+                let panel = NSOpenPanel()
+                panel.canChooseDirectories = true
+                panel.canChooseFiles = allowFiles
+                panel.allowsMultipleSelection = true
+                panel.beginSheetModal(for: window) { response in
+                    guard response == .OK else { return }
+                    for url in panel.urls where !paths.wrappedValue.contains(url.path) {
+                        paths.wrappedValue.append(url.path)
+                    }
+                }
+            }
         }
     }
 

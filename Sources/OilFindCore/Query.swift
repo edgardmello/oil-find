@@ -18,6 +18,37 @@ public struct Query {
         query.clauses.append(Clause(alternatives: [Atom(negated: false, matcher: .subtree(path))]))
         return query
     }
+    public struct SavedCriteria: Codable, Equatable {
+        public var folders: [String]
+        public var extensions: [String]
+        public var exclusions: [String]
+
+        public init(folders: [String], extensions: [String], exclusions: [String]) {
+            self.folders = folders
+            self.extensions = extensions
+            self.exclusions = exclusions
+        }
+
+        public var isEmpty: Bool { folders.isEmpty && extensions.isEmpty && exclusions.isEmpty }
+    }
+
+    public private(set) var savedCriteria: SavedCriteria?
+    public func applying(_ criteria: SavedCriteria) -> Query {
+        var query = self
+        query.savedCriteria = criteria
+        if !criteria.folders.isEmpty {
+            query.clauses.append(Clause(alternatives: [Atom(negated: false, matcher: .savedPaths(criteria.folders, includeRoots: false))]))
+        }
+        let keys = Set(criteria.extensions.compactMap(extKey))
+        if !keys.isEmpty {
+            query.clauses.append(Clause(alternatives: [Atom(negated: false, matcher: .ext(keys))]))
+        }
+        if !criteria.exclusions.isEmpty {
+            query.clauses.append(Clause(alternatives: [Atom(negated: true, matcher: .savedPaths(criteria.exclusions, includeRoots: true))]))
+        }
+        return query
+    }
+
     public private(set) var fuzzyNames = false
     public private(set) var hiddenOnly = false
     public func showingOnlyHiddenFiles() -> Query {
@@ -224,6 +255,7 @@ public enum Matcher {
     case fuzzyName([UInt8])
     case path(components: [[UInt8]])
     case subtree(String)
+    case savedPaths([String], includeRoots: Bool)
     case hidden
     case depth(UInt16)
     case glob(pattern: [UInt8], onPath: Bool)

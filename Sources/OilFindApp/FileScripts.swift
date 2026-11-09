@@ -3,7 +3,26 @@ import Darwin
 import Foundation
 
 struct FileScript: Codable, Identifiable, Equatable {
+    struct Eligibility: Codable, Equatable {
+        var extensions = ""
+        var minimum = 1
+        var maximum = 0
+        var filesOnly = false
+
+        func matches(_ selection: [(url: URL, isDirectory: Bool)]) -> Bool {
+            guard selection.count >= max(1, minimum), maximum == 0 || selection.count <= maximum else { return false }
+            let allowed = Set(extensions.lowercased().split(whereSeparator: { $0.isWhitespace || $0 == "," || $0 == ";" }).map {
+                String($0.drop(while: { $0 == "." }))
+            }.filter { !$0.isEmpty })
+            return selection.allSatisfy { file in
+                if file.isDirectory { return !filesOnly && allowed.isEmpty }
+                return allowed.isEmpty || allowed.contains(file.url.pathExtension.lowercased())
+            }
+        }
+    }
+
     let path: String
+    var eligibility: Eligibility?
     var id: String { path }
     var url: URL { URL(fileURLWithPath: path) }
     var name: String { url.lastPathComponent }

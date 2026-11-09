@@ -13,6 +13,7 @@ struct ExternalDriveRecord: Codable, Equatable, Identifiable {
 struct ExternalDrivePreferences: Codable {
     var enabled = true
     var drives: [ExternalDriveRecord] = []
+    var autoIndexNew: Bool?
 }
 
 /// Only validated UUIDs are used as file names; the catalog survives volume renames.
@@ -52,6 +53,7 @@ protocol ExternalDriveIndex: AnyObject {
     var onIndexChange: (() -> Void)? { get set }
     func start()
     func stop()
+    func rescan()
 }
 extension IndexManager: ExternalDriveIndex { }
 
@@ -193,6 +195,22 @@ final class ExternalDriveCatalog: ObservableObject, ExternalDriveCatalogReading 
         guard ready, value != enabled else { return }
         enabled = value; preferences.enabled = value; persist(); configurationChanged()
     }
+    var autoIndexNew: Bool { preferences.autoIndexNew ?? true }
+
+    func setAutoIndexNew(_ value: Bool) {
+        guard ready, autoIndexNew != value else { return }
+        objectWillChange.send()
+        preferences.autoIndexNew = value
+        persist()
+    }
+
+    func reindex(_ uuid: String) {
+        guard usable else { return }
+        let session = withSessions { sessions[uuid] }
+        guard let session, session.online, session.index.state == .ready else { return }
+        session.index.rescan()
+    }
+
     func setDriveEnabled(_ uuid: String, _ value: Bool) {
         guard usable, let i = preferences.drives.firstIndex(where: { $0.id == uuid }), preferences.drives[i].enabled != value else { return }
         preferences.drives[i].enabled = value
@@ -262,7 +280,7 @@ final class ExternalDriveCatalog: ObservableObject, ExternalDriveCatalogReading 
                 preferences.drives[i].name = volume.name; preferences.drives[i].path = volume.path
                 if previous[uuid] == nil || previous[uuid]?.path != volume.path { preferences.drives[i].lastConnected = now }
             } else {
-                preferences.drives.append(.init(id: uuid, name: volume.name, path: volume.path, lastConnected: now))
+                preferences.drives.append(.init(id: uuid, name: volume.name, path: volume.path, lastConnected: now, enabled: autoIndexNew))
             }
         }
         persist(); reconcile()

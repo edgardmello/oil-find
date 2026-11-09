@@ -37,6 +37,8 @@ final class ExternalDriveTests: XCTestCase {
         var starts = 0, stops = 0
         func start() { starts += 1 }
         var onStop: (() -> Void)?
+        private(set) var rescans = 0
+        func rescan() { rescans += 1 }
         func stop() { stops += 1; onStop?() }
         func complete(_ store: IndexStore) { self.store = store; state = .ready; onIndexChange?(); onStateChange?(.ready) }
     }
@@ -235,6 +237,34 @@ final class ExternalDriveTests: XCTestCase {
         XCTAssertTrue(catalog.searchSources().isEmpty); XCTAssertEqual(try XCTUnwrap(catalog.rows.first).status, .disabled)
         XCTAssertFalse(FileManager.default.fileExists(atPath: db.path))
         catalog.setDriveEnabled(uuid, true); XCTAssertEqual(indexes.count, 3)
+    }
+
+    func testNewDrivePolicyDoesNotDisableKnownDriveAndReindexTargetsSelectedVolume() throws {
+        var indexes: [String: Index] = [:]
+        var second = volume
+        second.uuid = secondUUID
+        second.name = "Second"
+        second.path = "/Volumes/Second"
+        let catalog = ExternalDriveCatalog(directory: temporaryDirectory(), monitor: Monitor(),
+                                           initialPreferences: .init(), makeIndex: { _, _, id in
+            let index = Index()
+            indexes[id] = index
+            return index
+        })
+        defer { catalog.stop() }
+        catalog.updateMounted([volume])
+        let first = try XCTUnwrap(indexes[uuid])
+        first.complete(store(path: volume.path))
+        catalog.setAutoIndexNew(false)
+        catalog.updateMounted([volume, second])
+        XCTAssertEqual(catalog.rows.first { $0.id == secondUUID }?.status, .disabled)
+        XCTAssertNil(indexes[secondUUID])
+        XCTAssertEqual(catalog.rows.first { $0.id == uuid }?.status, .connected)
+        catalog.reindex(secondUUID)
+        catalog.reindex(uuid)
+        XCTAssertEqual(first.rescans, 1)
+        catalog.setDriveEnabled(secondUUID, true)
+        XCTAssertNotNil(indexes[secondUUID])
     }
 
     func testDisconnectRetainsCatalogAndReconnectUsesSameUUIDAcrossRename() throws {

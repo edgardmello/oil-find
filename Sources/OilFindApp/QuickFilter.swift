@@ -1,4 +1,5 @@
 import Foundation
+import OilFindCore
 
 struct QuickFilter: Codable, Equatable {
     struct Sort: Codable, Equatable {
@@ -14,6 +15,7 @@ struct QuickFilter: Codable, Equatable {
     let hiddenOnly: Bool
     var fuzzyNames: Bool? = nil
     var sort: Sort? = nil
+    var criteria: Query.SavedCriteria? = nil
 
     static let storageKey = "savedQuickFilters"
 
