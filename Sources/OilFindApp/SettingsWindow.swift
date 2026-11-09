@@ -87,11 +87,6 @@ final class SettingsModel: ObservableObject {
         }
         refresh()
     }
-    // Grouped Form owns scrolling; the content grows until the specified 600 pt cap.
-    var contentHeight: CGFloat {
-        min(600, 880 - (granted ? 30 : 0) + CGFloat(max(0, excludedPaths.count - 1)) * 32
-            + (loginError == nil ? 0 : 40) + (shortcutError == nil ? 0 : 28))
-    }
     func startRefreshing() {
         refresh(); timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
@@ -319,12 +314,75 @@ private struct LanguagePicker: NSViewRepresentable {
     }
 }
 
+enum SettingsPage: String, Identifiable {
+    case general, search, index, drives, exclusions, shortcuts, scripts, topics, extensions
+
+    var id: Self { self }
+    var title: String { L10n.text(presentation.title) }
+    var icon: String { presentation.icon }
+
+    private var presentation: (title: String, icon: String) {
+        switch self {
+        case .general: return ("settings.general", "gearshape")
+        case .search: return ("settings.page.search", "magnifyingglass")
+        case .index: return ("settings.index", "internaldrive")
+        case .drives: return ("drivesTitle", "externaldrive")
+        case .exclusions: return ("settings.page.exclusions", "minus.circle")
+        case .shortcuts: return ("settings.page.shortcuts", "keyboard")
+        case .scripts: return ("fileScripts.title", "terminal")
+        case .topics: return ("topicsTitle", "text.bubble")
+        case .extensions: return ("settings.page.extensions", "puzzlepiece.extension")
+        }
+    }
+}
+
 private struct SettingsForm: View {
     @ObservedObject var model: SettingsModel
     var appExtension: ApplicationExtension?
     var externalDrives: ExternalDriveCatalog
     var window: () -> NSWindow?
+    @State var page: SettingsPage
     @State private var shortcutQuery = ""
+
+    private func sidebarGroup(_ title: String, pages: [SettingsPage]) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(L10n.text(title))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 4)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(pages) { destination in
+                Button {
+                    guard destination != page else { return }
+                    window()?.makeFirstResponder(nil)
+                    model.cancelRecording()
+                    page = destination
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: destination.icon)
+                            .frame(width: 18)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                        Text(destination == .shortcuts ? L10n.text("settings.sidebar.shortcuts") : destination.title)
+                            .fontWeight(page == destination ? .semibold : .regular)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background {
+                        if page == destination {
+                            RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.10))
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(page == destination ? .isSelected : [])
+                .accessibilityIdentifier("settings.page." + destination.rawValue)
+            }
+        }
+    }
 
     private var shortcutRows: [(action: StashShortcut, title: String)] {
         StashShortcut.allCases.compactMap { action in
@@ -343,46 +401,60 @@ private struct SettingsForm: View {
     }
 
     var body: some View {
-        Form {
-            Section(L10n.text("settings.general")) {
+        HStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    sidebarGroup("settings.group.app", pages: [.general])
+                    sidebarGroup("settings.group.indexing", pages: [.search, .index, .drives, .exclusions])
+                    sidebarGroup("settings.group.actions", pages: [.shortcuts, .scripts])
+                    sidebarGroup("settings.group.integrations", pages: appExtension == nil ? [.topics] : [.topics, .extensions])
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 20)
+            }
+            .frame(width: 192)
+            .background(.regularMaterial)
+            Divider()
+            VStack(alignment: .leading, spacing: 0) {
+                Text(page.title)
+                    .font(.title2.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 20)
+                    .padding(.bottom, 8)
+                if page == .shortcuts {
+                    TextField(L10n.text("settings.filterShortcuts"), text: $shortcutQuery)
+                        .textFieldStyle(.roundedBorder)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 8)
+                }
+                Form { pageContent }
+                    .formStyle(.grouped)
+                    .toggleStyle(.switch)
+                    .id(page)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+    }
+
+    @ViewBuilder private var pageContent: some View {
+        switch page {
+        case .general:
+            Section {
                 HStack {
                     Text(L10n.text("settings.language")); Spacer()
                     LanguagePicker(model: model).frame(width: 140, height: 24)
                 }
-                Text(UpdateManager.current.version.text).font(.footnote).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 5) {
                     Toggle(L10n.text("settings.login"), isOn: Binding(get: { model.launchAtLogin }, set: model.setLogin))
                     if let error = model.loginError { hint(error).foregroundStyle(.red) }
                 }
-                VStack(alignment: .leading, spacing: 5) {
-                    DisclosureGroup(L10n.text("syntax.keys")) {
-                        TextField(L10n.text("settings.filterShortcuts"), text: $shortcutQuery)
-                            .textFieldStyle(.roundedBorder)
-                        let matches = shortcutRows.filter { row in
-                            matchesShortcut(row.title, chord: model.stashShortcuts[row.action] ?? row.action.defaultChord)
-                        }
-                        let global = matchesShortcut(L10n.text("settings.shortcut"),
-                                                     chord: .init(keyCode: model.keyCode, modifiers: model.modifiers))
-                        if global {
-                            HStack {
-                                Text(L10n.text("settings.shortcut")); Spacer()
-                                ShortcutRecorder(model: model).frame(width: 120, height: 24)
-                            }
-                        }
-                        ForEach(matches, id: \.action) { row in
-                            HStack {
-                                Text(row.title)
-                                Spacer()
-                                ShortcutRecorder(model: model, stashShortcut: row.action).frame(width: 120, height: 24)
-                            }
-                        }
-                        if matches.isEmpty && !global {
-                            Text(L10n.text("settings.noShortcutMatches")).foregroundStyle(.secondary)
-                        }
-                    }
-                    hint(L10n.text("settings.stashShortcutHint"))
-                    if let error = model.shortcutError { hint(error).foregroundStyle(.red) }
-                }
+            } footer: {
+                hint(L10n.text("settings.version", UpdateManager.current.version.text))
+            }
+        case .search:
+            Section {
                 VStack(alignment: .leading, spacing: 5) {
                     Toggle(L10n.text("settings.pinyin"), isOn: Binding(get: { model.pinyinEnabled }, set: model.setPinyin))
                     hint(L10n.text("settings.pinyinHint"))
@@ -392,7 +464,35 @@ private struct SettingsForm: View {
                     hint(L10n.text("settings.previewSpaceHint"))
                 }
             }
-            Section(L10n.text("settings.index")) {
+        case .shortcuts:
+            let matches = shortcutRows.filter { row in
+                matchesShortcut(row.title, chord: model.stashShortcuts[row.action] ?? row.action.defaultChord)
+            }
+            let global = matchesShortcut(L10n.text("settings.shortcut"),
+                                         chord: .init(keyCode: model.keyCode, modifiers: model.modifiers))
+            Section {
+                if global {
+                    HStack {
+                        Text(L10n.text("settings.shortcut")); Spacer()
+                        ShortcutRecorder(model: model).frame(width: 120, height: 24)
+                    }
+                }
+                ForEach(matches, id: \.action) { row in
+                    HStack {
+                        Text(row.title)
+                        Spacer()
+                        ShortcutRecorder(model: model, stashShortcut: row.action).frame(width: 120, height: 24)
+                    }
+                }
+                if matches.isEmpty && !global {
+                    Text(L10n.text("settings.noShortcutMatches")).foregroundStyle(.secondary)
+                }
+            } header: {
+                hint(L10n.text("settings.stashShortcutHint"))
+                if let error = model.shortcutError { hint(error).foregroundStyle(.red) }
+            }
+        case .index:
+            Section {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
                         Text(L10n.text("settings.indexed")); Spacer()
@@ -444,12 +544,15 @@ private struct SettingsForm: View {
                 scopeRow("system", key: "indexSystemDirs", enabled: model.indexSystemDirs)
             } header: { Text(L10n.text("settings.scope")) }
               footer: { hint(L10n.text("settings.scopeHint")) }
-            Section(L10n.text("drivesTitle")) {
+        case .drives:
+            Section {
                 ExternalDriveSettings(catalog: externalDrives, chinese: L10n.chinese, window: window)
             }
-            Section(L10n.text("topicsTitle")) {
+        case .topics:
+            Section {
                 AITopicSettings(manager: model.topics)
             }
+        case .scripts:
             Section {
                 ForEach(Array(model.fileScripts.enumerated()), id: \.element.id) { index, script in
                     HStack {
@@ -467,9 +570,10 @@ private struct SettingsForm: View {
                 }
                 Button(L10n.text("fileScripts.add")) { model.addFileScript(in: window()) }
                 if let error = model.fileScriptError { hint(error).foregroundStyle(.red) }
-            } header: { Text(L10n.text("fileScripts.title")) }
-              footer: { hint(L10n.text("fileScripts.hint")) }
+            } footer: { hint(L10n.text("fileScripts.hint")) }
+        case .extensions:
             if let appExtension { appExtension.settingsSection(window: window) }
+        case .exclusions:
             Section {
                 if model.excludedPaths.isEmpty { Text(L10n.text("settings.noExcluded")).foregroundStyle(.secondary) }
                 ForEach(model.excludedPaths, id: \.self) { path in
@@ -488,8 +592,6 @@ private struct SettingsForm: View {
             } header: { Text(L10n.text("settings.excludedTypes")) }
               footer: { hint(L10n.text("settings.excludedTypesHint")) }
         }
-        .formStyle(.grouped).toggleStyle(.switch)
-        .frame(width: 540, height: model.contentHeight)
     }
     private func coverageBinding(_ key: String) -> Binding<Bool> {
         Binding(get: { model.expandedCoverage.contains(key) }, set: { if $0 { model.expandedCoverage.insert(key) } else { model.expandedCoverage.remove(key) } })
@@ -593,29 +695,33 @@ final class SettingsWindow: NSWindow {
 
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let model: SettingsModel
-    init(model: SettingsModel, appExtension: ApplicationExtension? = nil, externalDrives: ExternalDriveCatalog = ExternalDriveCatalog()) {
+    init(model: SettingsModel, appExtension: ApplicationExtension? = nil, externalDrives: ExternalDriveCatalog = ExternalDriveCatalog(), initialPage: SettingsPage = .general) {
         self.model = model
         model.externalDrives = externalDrives
         model.additionalSources = { [weak appExtension, weak externalDrives] in
             (externalDrives?.searchSources() ?? []) + (appExtension?.searchSources() ?? [])
         }
-        let window = SettingsWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: model.contentHeight), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let window = SettingsWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 560), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.contentMinSize = NSSize(width: 680, height: 440)
         window.settingsModel = model
         window.title = L10n.text("settings.title"); window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
-        window.contentViewController = NSHostingController(rootView: SettingsForm(model: model, appExtension: appExtension, externalDrives: externalDrives, window: { [weak window] in window }))
-        model.onContentChange = { [weak self] in self?.resizeToContent() }
+        let settings = SettingsForm(model: model, appExtension: appExtension, externalDrives: externalDrives,
+                                    window: { [weak window] in window }, page: initialPage)
+        let hosting = NSHostingController(rootView: settings)
+        hosting.sizingOptions = []
+        window.contentViewController = hosting
+        model.onContentChange = { [weak self] in self?.refreshTitle() }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func present() {
         guard let window else { return }
-        if !window.isVisible { model.startRefreshing(); resizeToContent(); window.center() }
+        if !window.isVisible { model.startRefreshing(); refreshTitle(); window.center() }
         window.makeKeyAndOrderFront(nil)
     }
-    private func resizeToContent() {
+    private func refreshTitle() {
         window?.title = L10n.text("settings.title")
-        window?.setContentSize(NSSize(width: 540, height: model.contentHeight))
     }
     func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
         (client as? ExcludedExtensionsField)?.editor
