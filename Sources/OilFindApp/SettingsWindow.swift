@@ -12,7 +12,7 @@ final class SettingsModel: ObservableObject {
     private let languageDefaults: UserDefaults
     private var coverageExplanation: CoverageExplanation?
     private let snapshot: Bool
-    private let preferences: UserDefaults
+    fileprivate let preferences: UserDefaults
     @Published var loginError: String?
     @Published var previewWithSpace: Bool
     @Published var excludedExtensionsText: String
@@ -44,6 +44,7 @@ final class SettingsModel: ObservableObject {
     private var inspectionGeneration = 0
     var onConfigChange: (() -> Void)?
     var onPinyinChange: (() -> Void)?
+    var onSearchSettingsChange: ((String) -> Void)?
     var onStashShortcutsChange: (() -> Void)?
     var suspendHotKey: (() -> Void)?
     var registerHotKey: ((UInt32, UInt32) -> Bool)?
@@ -315,7 +316,7 @@ private struct LanguagePicker: NSViewRepresentable {
 }
 
 enum SettingsPage: String, Identifiable {
-    case general, search, index, drives, exclusions, shortcuts, scripts, topics, extensions
+    case general, style, actionBar, search, filters, index, drives, exclusions, shortcuts, scripts, topics, extensions
 
     var id: Self { self }
     var title: String { L10n.text(presentation.title) }
@@ -324,6 +325,9 @@ enum SettingsPage: String, Identifiable {
     private var presentation: (title: String, icon: String) {
         switch self {
         case .general: return ("settings.general", "gearshape")
+        case .style: return ("settings.page.style", "paintbrush")
+        case .actionBar: return ("settings.page.actionBar", "rectangle.bottomthird.inset.filled")
+        case .filters: return ("settings.page.filters", "line.3.horizontal.decrease.circle")
         case .search: return ("settings.page.search", "magnifyingglass")
         case .index: return ("settings.index", "internaldrive")
         case .drives: return ("drivesTitle", "externaldrive")
@@ -343,6 +347,75 @@ private struct SettingsForm: View {
     var window: () -> NSWindow?
     @State var page: SettingsPage
     @State private var shortcutQuery = ""
+    @State private var selectedScript: FileScript?
+
+    private func preference(_ key: String, default fallback: Bool = false) -> Binding<Bool> {
+        Binding(get: { model.preferences.object(forKey: key) as? Bool ?? fallback }, set: { value in
+            model.objectWillChange.send()
+            model.preferences.set(value, forKey: key)
+            model.onSearchSettingsChange?(key)
+        })
+    }
+
+    private func option(_ title: String, help: String, value: Binding<Bool>) -> some View {
+        Toggle(isOn: value) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L10n.text(title))
+                hint(L10n.text(help))
+            }
+        }
+    }
+
+    private func previewChoice<Preview: View>(_ title: String, example: String, selected: Bool, action: @escaping () -> Void, @ViewBuilder preview: () -> Preview) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                preview()
+                    .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
+                    .padding(8)
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
+                    .accessibilityHidden(true)
+                Text(L10n.text(title)).font(.headline)
+                hint(L10n.text(example))
+            }
+            .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
+            .padding(12)
+            .background(selected ? Color.accentColor.opacity(0.11) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: selected ? 2 : 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func resultExample(table: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if table {
+                HStack {
+                    Text(L10n.text("stash.column.name"))
+                    Spacer()
+                    Text(L10n.text("stash.column.size"))
+                }.foregroundStyle(.secondary)
+                Divider()
+            }
+            ForEach(["Report.pdf", "Notes.txt"], id: \.self) { file in
+                HStack {
+                    Label(file, systemImage: "doc")
+                    Spacer()
+                    if table { Text(file == "Report.pdf" ? "128 KB" : "4 KB").foregroundStyle(.secondary) }
+                }
+                if !table { Text("~/Documents").foregroundStyle(.secondary).padding(.leading, 18) }
+            }
+        }
+        .font(.caption)
+    }
+
+    private func matchingExample(_ query: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(query, systemImage: "magnifyingglass").font(.system(.caption, design: .monospaced))
+            Divider()
+            Label("CHANGELOG.md", systemImage: "doc.text").font(.caption)
+        }
+    }
 
     private func sidebarGroup(_ title: String, pages: [SettingsPage]) -> some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -362,17 +435,18 @@ private struct SettingsForm: View {
                     HStack(spacing: 8) {
                         Image(systemName: destination.icon)
                             .frame(width: 18)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(page == destination ? Color.white : .accentColor)
                             .accessibilityHidden(true)
                         Text(destination == .shortcuts ? L10n.text("settings.sidebar.shortcuts") : destination.title)
                             .fontWeight(page == destination ? .semibold : .regular)
+                            .foregroundStyle(page == destination ? Color.white : .primary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
                     .background {
                         if page == destination {
-                            RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.10))
+                            RoundedRectangle(cornerRadius: 7).fill(Color.accentColor)
                         }
                     }
                     .contentShape(Rectangle())
@@ -404,8 +478,8 @@ private struct SettingsForm: View {
         HStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    sidebarGroup("settings.group.app", pages: [.general])
-                    sidebarGroup("settings.group.indexing", pages: [.search, .index, .drives, .exclusions])
+                    sidebarGroup("settings.group.app", pages: [.general, .style, .actionBar])
+                    sidebarGroup("settings.group.indexing", pages: [.search, .filters, .index, .drives, .exclusions])
                     sidebarGroup("settings.group.actions", pages: [.shortcuts, .scripts])
                     sidebarGroup("settings.group.integrations", pages: appExtension == nil ? [.topics] : [.topics, .extensions])
                 }
@@ -428,11 +502,15 @@ private struct SettingsForm: View {
                         .padding(.horizontal, 24)
                         .padding(.bottom, 8)
                 }
-                Form { pageContent }
+                if page == .filters {
+                    SavedFilterSettings(preferences: model.preferences)
+                } else {
+                    Form { pageContent }
                     .formStyle(.grouped)
                     .toggleStyle(.switch)
                     .id(page)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
             .background(Color(nsColor: .windowBackgroundColor))
         }
@@ -450,20 +528,79 @@ private struct SettingsForm: View {
                     Toggle(L10n.text("settings.login"), isOn: Binding(get: { model.launchAtLogin }, set: model.setLogin))
                     if let error = model.loginError { hint(error).foregroundStyle(.red) }
                 }
+            }
+            Section {
+                HStack {
+                    Text(L10n.text("settings.shortcut"))
+                    Spacer()
+                    ShortcutRecorder(model: model).frame(width: 120, height: 24)
+                }
+                if let error = model.shortcutError { hint(error).foregroundStyle(.red) }
+            } header: {
+                Text(L10n.text("settings.page.shortcuts"))
             } footer: {
                 hint(L10n.text("settings.version", UpdateManager.current.version.text))
             }
-        case .search:
-            Section {
-                VStack(alignment: .leading, spacing: 5) {
-                    Toggle(L10n.text("settings.pinyin"), isOn: Binding(get: { model.pinyinEnabled }, set: model.setPinyin))
-                    hint(L10n.text("settings.pinyinHint"))
+        case .style:
+            let compact = preference("compactResults")
+            Section(L10n.text("view.results")) {
+                HStack(alignment: .top, spacing: 12) {
+                    previewChoice("view.original", example: "settings.style.listHint", selected: !compact.wrappedValue) {
+                        compact.wrappedValue = false
+                    } preview: {
+                        resultExample(table: false)
+                    }
+                    previewChoice("view.compact", example: "settings.style.tableHint", selected: compact.wrappedValue) {
+                        compact.wrappedValue = true
+                    } preview: {
+                        resultExample(table: true)
+                    }
                 }
-                VStack(alignment: .leading, spacing: 5) {
-                    Toggle(L10n.text("settings.previewSpace"), isOn: Binding(get: { model.previewWithSpace }, set: model.setPreviewWithSpace))
-                    hint(L10n.text("settings.previewSpaceHint"))
+                option("settings.style.preview", help: "settings.style.previewHint", value: preference("defaultSidePreview"))
+            }
+        case .actionBar:
+            Section(L10n.text("settings.actionBar.rows")) {
+                option("settings.actionBar.hints", help: "settings.actionBar.hintsHelp", value: preference("showActionHints", default: true))
+                option("footer.openWith", help: "settings.actionBar.appsHelp", value: preference("showOpenWithRow", default: true))
+            }
+            Section(L10n.text("settings.actionBar.preview")) {
+                HStack(spacing: 12) {
+                    if preference("showActionHints", default: true).wrappedValue {
+                        Label(L10n.text("hint.open"), systemImage: "return")
+                        Label(L10n.text("hint.preview"), systemImage: "eye")
+                    }
+                    Label(L10n.text("panel.actions"), systemImage: "ellipsis.circle")
+                    Spacer()
+                }.foregroundStyle(.secondary)
+                if preference("showOpenWithRow", default: true).wrappedValue {
+                    Label(L10n.text("footer.openWith"), systemImage: "app")
+                        .foregroundStyle(.secondary)
                 }
             }
+        case .search:
+            let fuzzy = preference("fuzzyNames")
+            Section(L10n.text("settings.search.matching")) {
+                HStack(alignment: .top, spacing: 12) {
+                    previewChoice("settings.search.literal", example: "settings.search.literalHint", selected: !fuzzy.wrappedValue) {
+                        fuzzy.wrappedValue = false
+                    } preview: {
+                        matchingExample("changelog")
+                    }
+                    previewChoice("scope.fuzzyNames", example: "settings.search.fuzzyHint", selected: fuzzy.wrappedValue) {
+                        fuzzy.wrappedValue = true
+                    } preview: {
+                        matchingExample("clgmd")
+                    }
+                }
+                option("settings.pinyin", help: "settings.pinyinHint",
+                       value: Binding(get: { model.pinyinEnabled }, set: model.setPinyin))
+            }
+            Section(L10n.text("hint.preview")) {
+                option("settings.previewSpace", help: "settings.previewSpaceHint",
+                       value: Binding(get: { model.previewWithSpace }, set: model.setPreviewWithSpace))
+            }
+        case .filters:
+            EmptyView()
         case .shortcuts:
             let matches = shortcutRows.filter { row in
                 matchesShortcut(row.title, chord: model.stashShortcuts[row.action] ?? row.action.defaultChord)
@@ -554,23 +691,48 @@ private struct SettingsForm: View {
             }
         case .scripts:
             Section {
-                ForEach(Array(model.fileScripts.enumerated()), id: \.element.id) { index, script in
-                    HStack {
-                        Text(script.name).lineLimit(1).truncationMode(.middle).help(script.path)
-                        Spacer()
-                        if StashShortcut.scripts.indices.contains(index) {
-                            ShortcutRecorder(model: model, stashShortcut: StashShortcut.scripts[index]).frame(width: 120, height: 24)
+                if model.fileScripts.isEmpty { hint(L10n.text("settings.scripts.empty")) }
+                ForEach(model.fileScripts) { script in
+                    Button {
+                        model.cancelRecording()
+                        selectedScript = script
+                    } label: {
+                        HStack {
+                            Label(script.name, systemImage: "doc.text")
+                                .lineLimit(1).truncationMode(.middle)
+                            Spacer()
+                            if activeScript == script { Image(systemName: "checkmark") }
                         }
-                        Button { model.removeFileScript(script) } label: {
-                            Image(systemName: "minus.circle")
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel(L10n.text("fileScripts.remove", script.name))
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(activeScript == script ? .isSelected : [])
                 }
                 Button(L10n.text("fileScripts.add")) { model.addFileScript(in: window()) }
                 if let error = model.fileScriptError { hint(error).foregroundStyle(.red) }
             } footer: { hint(L10n.text("fileScripts.hint")) }
+            if let script = activeScript, let index = model.fileScripts.firstIndex(of: script) {
+                Section(script.name) {
+                    Text(script.path).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
+                    if StashShortcut.scripts.indices.contains(index) {
+                        HStack {
+                            Text(L10n.text("settings.sidebar.shortcuts"))
+                            Spacer()
+                            ShortcutRecorder(model: model, stashShortcut: StashShortcut.scripts[index]).frame(width: 120, height: 24)
+                        }
+                        if let error = model.shortcutError { hint(error).foregroundStyle(.red) }
+                    }
+                    HStack {
+                        Button(L10n.text("ctx.reveal")) { NSWorkspace.shared.activateFileViewerSelecting([script.url]) }
+                        Spacer()
+                        Button(L10n.text("fileScripts.remove", script.name), role: .destructive) {
+                            model.cancelRecording()
+                            model.removeFileScript(script)
+                            selectedScript = nil
+                        }
+                    }
+                }.id(script.id)
+            }
         case .extensions:
             if let appExtension { appExtension.settingsSection(window: window) }
         case .exclusions:
@@ -593,6 +755,10 @@ private struct SettingsForm: View {
               footer: { hint(L10n.text("settings.excludedTypesHint")) }
         }
     }
+    private var activeScript: FileScript? {
+        selectedScript.flatMap { model.fileScripts.contains($0) ? $0 : nil } ?? model.fileScripts.first
+    }
+
     private func coverageBinding(_ key: String) -> Binding<Bool> {
         Binding(get: { model.expandedCoverage.contains(key) }, set: { if $0 { model.expandedCoverage.insert(key) } else { model.expandedCoverage.remove(key) } })
     }

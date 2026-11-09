@@ -581,7 +581,31 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
     }
 
+    func applySearchSetting(_ key: String) {
+        guard isViewLoaded else { return }
+        switch key {
+        case "compactResults":
+            results.setCompact(preferences.bool(forKey: key))
+        case "fuzzyNames":
+            fuzzyNames = preferences.bool(forKey: key)
+            scopeChanged()
+        case "showActionHints":
+            footer.showActionHints = preferences.object(forKey: key) as? Bool ?? true
+        case "showOpenWithRow":
+            refreshApplicationSuggestions()
+        default:
+            break
+        }
+    }
+
+    func preparePanelAppearance() {
+        if !snapshot {
+            setInlinePreviewVisible(preferences.bool(forKey: "defaultSidePreview"), resize: false)
+        }
+    }
+
     func panelWillShow() {
+        if !snapshot { applySearchSetting("showActionHints") }
         refreshApplicationSuggestions()
         filters.scopeActive = folderScope != nil || volumeScope != nil
         filters.searchOptionsActive = hiddenOnly || fuzzyNames
@@ -1461,6 +1485,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     private func requestApplicationSuggestions(for file: URL?) {
+        let file = (preferences.object(forKey: "showOpenWithRow") as? Bool ?? true) ? file : nil
         guard file != applicationSuggestionsFile else { return }
         applicationSuggestionsWork?.cancel()
         applicationSuggestionsFile = file
