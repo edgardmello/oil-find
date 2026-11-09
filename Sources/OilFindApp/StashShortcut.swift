@@ -3,7 +3,7 @@ import Carbon
 import OilFindCore
 
 enum StashShortcut: String, CaseIterable {
-    case add, show, paste, remove
+    case add, show, paste, remove, clearStash
     case syntax, actions, preview, inlinePreview, open
     case reveal, copyPath, copyName, trash, settings
     case close, selectAll, up, down, extendUp
@@ -35,6 +35,7 @@ enum StashShortcut: String, CaseIterable {
         switch self {
         case .add: return Chord(keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(controlKey | optionKey))
         case .show: return Chord(keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(cmdKey | shiftKey))
+        case .clearStash: return Chord(keyCode: UInt32(kVK_Delete), modifiers: UInt32(cmdKey | shiftKey | optionKey))
         case .remove: return Chord(keyCode: UInt32(kVK_Delete), modifiers: UInt32(cmdKey | shiftKey))
         case .paste: return Chord(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(controlKey | optionKey))
         case .syntax: return Chord(keyCode: UInt32(kVK_ANSI_Slash), modifiers: UInt32(cmdKey))
@@ -79,6 +80,7 @@ enum StashShortcut: String, CaseIterable {
         switch self {
         case .add: return L10n.text("settings.stashAddShortcut")
         case .show: return L10n.text("settings.stashShowShortcut")
+        case .clearStash: return L10n.text("stash.clear")
         case .remove: return L10n.text("stash.removeSelection")
         case .paste: return L10n.text("filePaste.title")
         case .syntax: return L10n.text("hint.syntax")

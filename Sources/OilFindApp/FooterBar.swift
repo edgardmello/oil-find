@@ -23,6 +23,22 @@ private final class KeyHint: FlippedView {
 }
 
 final class FooterBar: FlippedView {
+    struct Application {
+        let url: URL
+        let name: String
+        let icon: NSImage
+    }
+
+    private let appChooser = NSButton()
+    private let appScroll = NSScrollView()
+    private let appStrip = NSView()
+    private var applicationButtons: [NSButton] = []
+    private var applications: [Application] = []
+    var onChooseApplication: (() -> Void)?
+    var onOpenApplication: ((URL) -> Void)?
+    private var showsApplicationRow = false
+    var desiredHeight: CGFloat { showsApplicationRow ? 62 : 34 }
+
     private let toast = Theme.label(11.5, .regular, .labelColor)
     private var toastTimer: Timer?
     private var toastContent: (ToastKind, String)?
@@ -83,6 +99,20 @@ final class FooterBar: FlippedView {
         inlinePreview.action = #selector(toggleInlinePreview)
         addSubview(inlinePreview)
         addSubview(actions); addSubview(stash)
+        appChooser.bezelStyle = .recessed
+        appChooser.font = .systemFont(ofSize: 11, weight: .medium)
+        appChooser.title = L10n.text("footer.openWith")
+        appChooser.target = self
+        appChooser.action = #selector(chooseApplication)
+        appScroll.drawsBackground = false
+        appScroll.hasHorizontalScroller = true
+        appScroll.autohidesScrollers = true
+        appScroll.scrollerStyle = .overlay
+        appScroll.documentView = appStrip
+        appChooser.isHidden = true
+        appScroll.isHidden = true
+        addSubview(appChooser)
+        addSubview(appScroll)
         actions.onPress = { [weak self] in
             guard let self else { return }
             self.onActions?(self.actions)
@@ -94,6 +124,39 @@ final class FooterBar: FlippedView {
         actionable = false
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func setApplications(_ apps: [Application], pending: Bool = false) {
+        applications = apps
+        showsApplicationRow = pending || !apps.isEmpty
+        appChooser.isHidden = !showsApplicationRow
+        appScroll.isHidden = apps.isEmpty
+        applicationButtons.forEach { $0.removeFromSuperview() }
+        var x: CGFloat = 0
+        applicationButtons = apps.enumerated().map { index, app in
+            let button = NSButton(title: app.name, image: app.icon, target: self, action: #selector(openApplication(_:)))
+            button.bezelStyle = .recessed
+            button.imagePosition = .imageLeading
+            button.font = .systemFont(ofSize: 11)
+            button.toolTip = app.name
+            button.tag = index
+            let width = min(200, ceil(button.fittingSize.width) + 4)
+            button.frame = NSRect(x: x, y: 1, width: width, height: 22)
+            x += width + 4
+            appStrip.addSubview(button)
+            return button
+        }
+        appStrip.frame = NSRect(x: 0, y: 0, width: x, height: 24)
+        appScroll.contentView.scroll(to: .zero)
+        appScroll.reflectScrolledClipView(appScroll.contentView)
+        needsLayout = true
+    }
+
+    @objc private func chooseApplication() { onChooseApplication?() }
+
+    @objc private func openApplication(_ button: NSButton) {
+        guard applications.indices.contains(button.tag) else { return }
+        onOpenApplication?(applications[button.tag].url)
+    }
+
     func showToast(_ kind: ToastKind, value: String, snapshot: Bool = false) {
         toastContent = (kind, value)
         toastTimer?.invalidate()
@@ -122,6 +185,7 @@ final class FooterBar: FlippedView {
         inlinePreview.setAccessibilityLabel(title)
     }
     func localize() {
+        appChooser.title = L10n.text("footer.openWith")
         refreshButtons()
         updateInlinePreviewButton()
         updatePreviewKey()
@@ -133,6 +197,12 @@ final class FooterBar: FlippedView {
     deinit { toastTimer?.invalidate() }
     override func layout() {
         super.layout()
+        if showsApplicationRow {
+            let width = ceil(appChooser.fittingSize.width) + 4
+            appChooser.frame = NSRect(x: 18, y: 34, width: width, height: 22)
+            appScroll.frame = NSRect(x: appChooser.frame.maxX + 6, y: 33,
+                                     width: max(0, bounds.width - appChooser.frame.maxX - 24), height: 24)
+        }
         settings.frame = NSRect(x: bounds.width - 18 - settings.desiredWidth, y: 4, width: settings.desiredWidth, height: 26)
         inlinePreview.frame = NSRect(x: settings.frame.minX - 29, y: 4, width: 26, height: 26)
         var right = inlinePreview.frame.minX - 6
