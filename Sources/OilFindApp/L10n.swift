@@ -312,7 +312,7 @@ enum L10n {
         "settings.actionBar.rows": ("显示内容", "Visible Controls"),
         "settings.actionBar.hints": ("文件操作快捷键提示", "File Action Hints"),
         "settings.actionBar.hintsHelp": ("在底部显示打开文件和快速查看的快捷键。", "Show the Open and Quick Look shortcuts below the results."),
-        "settings.actionBar.appsHelp": ("为选中的文件显示兼容的应用。", "Show compatible apps for the selected file."),
+        "settings.actionBar.appsHelp": ("仅在紧凑表格中为选中的文件显示兼容的应用。", "Show compatible apps for the selected file in Compact Table."),
         "settings.actionBar.preview": ("布局预览", "Layout Preview"),
         "settings.search.matching": ("文件名匹配", "Filename Matching"),
         "settings.search.literal": ("按原文匹配", "Literal Matching"),

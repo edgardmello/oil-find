@@ -572,7 +572,7 @@ private struct SettingsForm: View {
                     Label(L10n.text("panel.actions"), systemImage: "ellipsis.circle")
                     Spacer()
                 }.foregroundStyle(.secondary)
-                if preference("showOpenWithRow", default: true).wrappedValue {
+                if preference("compactResults").wrappedValue && preference("showOpenWithRow", default: true).wrappedValue {
                     Label(L10n.text("footer.openWith"), systemImage: "app")
                         .foregroundStyle(.secondary)
                 }
