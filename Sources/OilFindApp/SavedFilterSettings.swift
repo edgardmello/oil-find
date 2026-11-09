@@ -4,8 +4,18 @@ import OilFindCore
 
 struct SavedFilterSettings: View {
     private let preferences: UserDefaults
+    @ObservedObject var drives: ExternalDriveCatalog
     private let window: () -> NSWindow?
     @AppStorage(QuickFilter.storageKey) private var storedFilters: Data?
+    @AppStorage(QuickFilter.libraryKey) private var storedLibrary: Data?
+    @State private var group: QuickFilter.Group = .quick
+    @State private var symbol = QuickFilter.symbols[0]
+    @State private var prepend = ""
+    @State private var append = ""
+    @State private var match: QuickFilter.Match = .both
+    @State private var expiry = -1
+    @State private var rawEditor = false
+    @AppStorage(QuickFilter.expiryKey) private var globalExpiry = 0
     @State private var selection: Int?
     @State private var original: QuickFilter?
     @State private var name = ""
@@ -20,17 +30,20 @@ struct SavedFilterSettings: View {
     @State private var ascending = false
     @State private var conflict = false
 
-    init(preferences: UserDefaults, window: @escaping () -> NSWindow?) {
+    init(preferences: UserDefaults, drives: ExternalDriveCatalog, window: @escaping () -> NSWindow?) {
         self.preferences = preferences
         self.window = window
+        self.drives = drives
+        _globalExpiry = AppStorage(wrappedValue: 0, QuickFilter.expiryKey, store: preferences)
+        _storedLibrary = AppStorage(QuickFilter.libraryKey, store: preferences)
         _storedFilters = AppStorage(QuickFilter.storageKey, store: preferences)
     }
 
-    private var filters: [QuickFilter] { QuickFilter.load(from: preferences) }
+    private var filters: [QuickFilter] { QuickFilter.load(from: preferences) + QuickFilter.library(in: preferences) }
     private var validName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var duplicateName: Bool {
         filters.enumerated().contains { index, filter in
-            index != selection && filter.name.caseInsensitiveCompare(validName) == .orderedSame
+            index != selection && (filter.group ?? .quick) == group && filter.name.caseInsensitiveCompare(validName) == .orderedSame
         }
     }
 
@@ -52,43 +65,73 @@ struct SavedFilterSettings: View {
         return QuickFilter(name: validName, query: query, kind: kind, folder: folders.count == 1 ? folders.first : nil,
                     volume: original?.volume, hiddenOnly: hiddenOnly,
                     fuzzyNames: fuzzyNames ? true : original?.fuzzyNames.map { _ in false },
-                    sort: sortKey.map { .init(key: $0, ascending: ascending) }, criteria: criteria.isEmpty ? nil : criteria)
+                    sort: sortKey.map { .init(key: $0, ascending: ascending) }, criteria: criteria.isEmpty ? nil : criteria,
+                    group: original == nil || original?.group != nil ? group : nil, presetID: original?.presetID,
+                    symbol: symbol == QuickFilter.symbols[0] && original?.symbol == nil ? nil : symbol,
+                    prepend: prepend.isEmpty ? nil : prepend, append: append.isEmpty ? nil : append,
+                    match: match == .both ? nil : match, expiresAfter: expiry < 0 ? nil : expiry)
     }
 
     private var canSave: Bool {
         let hasSearch = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || kind != nil
-            || draft.folder != nil || draft.criteria != nil || hiddenOnly || original?.volume != nil
+            || !prepend.isEmpty || !append.isEmpty || match != .both || draft.folder != nil || draft.criteria != nil || hiddenOnly || original?.volume != nil
         return validExtensions && !validName.isEmpty && !duplicateName && draft != original && (original != nil || hasSearch)
     }
 
     var body: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                List(selection: Binding(get: { selection }, set: select)) {
-                    ForEach(Array(filters.enumerated()), id: \.offset) { index, filter in
-                        Label(filter.name, systemImage: "line.3.horizontal.decrease.circle")
-                            .lineLimit(1)
-                            .help(filter.name)
-                            .tag(index)
+            List(selection: Binding(get: { selection }, set: select)) {
+                librarySection(.quick, overview: -1)
+                librarySection(.folder, overview: -2)
+                Section(L10n.text("settings.filters.other")) {
+                    Label(L10n.text("settings.filters.disconnected"), systemImage: "externaldrive")
+                        .tag(-3)
+                }
+            }
+            .listStyle(.sidebar)
+            .accessibilityLabel(L10n.text("settings.page.filters"))
+            .frame(width: 176)
+            Divider()
+            if let selection, selection < 0 {
+                overview(selection)
+            } else {
+                editor
+            }
+        }
+        .onAppear { select(-1) }
+        .onChange(of: storedFilters) { _, _ in checkForExternalChange() }
+        .onChange(of: storedLibrary) { _, _ in checkForExternalChange() }
+    }
+
+    private var editor: some View {
+            Form {
+                Section(original == nil ? group.newTitle : L10n.text("settings.filters.edit")) {
+                    TextField(L10n.text("quickFilter.name"), text: $name)
+                    Picker(L10n.text("settings.filters.icon"), selection: $symbol) {
+                        ForEach(QuickFilter.symbols, id: \.self) { icon in
+                            Image(systemName: icon).accessibilityLabel(icon).tag(icon)
+                        }
+                    }
+                    Picker(L10n.text("settings.filters.editMode"), selection: $rawEditor) {
+                        Text(L10n.text("settings.filters.structured")).tag(false)
+                        Text(L10n.text("settings.filters.raw")).tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    if rawEditor {
+                        TextField(L10n.text("settings.filters.query"), text: $query)
+                            .font(.system(.body, design: .monospaced))
+                        Text(L10n.text("settings.filters.rawHint")).foregroundStyle(.secondary)
                     }
                 }
-                .listStyle(.sidebar)
-                .accessibilityLabel(L10n.text("settings.page.filters"))
-                Button { select(nil) } label: {
-                    Label(L10n.text("settings.filters.new"), systemImage: "plus.circle")
-                }
-                .buttonStyle(.borderless)
-                .padding([.leading, .bottom], 12)
-            }
-            .frame(width: 156)
-            Divider()
-            Form {
-                Section(original == nil ? L10n.text("settings.filters.new") : L10n.text("settings.filters.edit")) {
-                    TextField(L10n.text("quickFilter.name"), text: $name)
-                    TextField(L10n.text("settings.filters.query"), text: $query)
-                        .font(.system(.body, design: .monospaced))
-                }
+                if !rawEditor {
                 Section(L10n.text("settings.filters.criteria")) {
+                    Picker(L10n.text("settings.filters.match"), selection: $match) {
+                        ForEach(QuickFilter.Match.allCases, id: \.rawValue) { value in
+                            Text(L10n.text("settings.filters.match." + value.rawValue)).tag(value)
+                        }
+                    }
+                    TextField(L10n.text("settings.filters.prepend"), text: $prepend)
+                    TextField(L10n.text("settings.filters.append"), text: $append)
                     Picker(L10n.text("settings.filters.kind"), selection: $kind) {
                         Text(L10n.text("filter.all")).tag(nil as UInt8?)
                         ForEach(Array(FilterBar.names.dropFirst().enumerated()), id: \.offset) { index, name in
@@ -107,6 +150,10 @@ struct SavedFilterSettings: View {
                     Toggle(L10n.text("scope.hiddenOnly"), isOn: $hiddenOnly)
                     Toggle(L10n.text("scope.fuzzyNames"), isOn: $fuzzyNames)
                 }
+                }
+                Section(L10n.text("settings.filters.expiry")) {
+                    expiryPicker(selection: $expiry, includeDefault: true)
+                }
                 Section(L10n.text("settings.filters.order")) {
                     Picker(L10n.text("settings.filters.order"), selection: $sortKey) {
                         Text(L10n.text("settings.filters.currentOrder")).tag(nil as String?)
@@ -123,6 +170,10 @@ struct SavedFilterSettings: View {
                 }
                 Section {
                     HStack {
+                        if let id = original?.presetID,
+                           let preset = QuickFilter.presets.first(where: { $0.presetID == id }), preset != original {
+                            Button(L10n.text("settings.filters.reset")) { reset(to: preset) }
+                        }
                         if original != nil {
                             Button(L10n.text("settings.filters.remove"), role: .destructive, action: remove)
                         }
@@ -142,22 +193,101 @@ struct SavedFilterSettings: View {
             }
             .formStyle(.grouped)
             .toggleStyle(.switch)
-        }
-        .onAppear { if !filters.isEmpty { select(0) } }
-        .onChange(of: storedFilters) { _, _ in
-            guard let selection, let original else { return }
-            let current = filters
-            if !current.indices.contains(selection) || current[selection] != original {
+    }
+
+    private func librarySection(_ group: QuickFilter.Group, overview: Int) -> some View {
+        Section(group.title) {
+            Label(group.overviewTitle, systemImage: group == .quick ? "slider.horizontal.3" : "folder")
+                .tag(overview)
+            ForEach(Array(filters.enumerated()).filter { ($0.element.group ?? .quick) == group }, id: \.offset) { index, filter in
+                Label {
+                    Text(filter.name).lineLimit(1)
+                } icon: {
+                    Image(systemName: filter.icon)
+                        .foregroundStyle(group == .quick ? Color.accentColor : .teal)
+                }
+                .help(filter.name)
+                .tag(index)
+            }
+            Button {
                 select(nil)
-                conflict = true
+                self.group = group
+                symbol = group == .folder ? "folder" : QuickFilter.symbols[0]
+            } label: {
+                Label(group.newTitle, systemImage: "plus.circle")
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    private func expiryPicker(selection: Binding<Int>, includeDefault: Bool) -> some View {
+        Picker(L10n.text("settings.filters.expiry"), selection: selection) {
+            if includeDefault { Text(L10n.text("settings.filters.expiryDefault")).tag(-1) }
+            Text(L10n.text("settings.general.never")).tag(0)
+            ForEach([1, 5, 15, 30], id: \.self) { minutes in
+                Text(L10n.text("settings.general.minutes", String(minutes))).tag(minutes * 60)
             }
         }
     }
 
+    private func overview(_ selection: Int) -> some View {
+        Form {
+            if selection == -3 {
+                Section(L10n.text("settings.filters.disconnected")) {
+                    let disconnected = drives.knownDrives.filter { !$0.isConnected }
+                    if disconnected.isEmpty {
+                        Text(L10n.text("settings.filters.noDisconnected")).foregroundStyle(.secondary)
+                    }
+                    ForEach(disconnected, id: \.id) { drive in
+                        LabeledContent(drive.name, value: drive.path)
+                    }
+                }
+            } else {
+                let group: QuickFilter.Group = selection == -1 ? .quick : .folder
+                Section(group.overviewTitle) {
+                    ForEach(Array(filters.enumerated()).filter { ($0.element.group ?? .quick) == group }, id: \.offset) { index, filter in
+                        Button { select(index) } label: {
+                            Label(filter.name, systemImage: filter.icon)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                Section(L10n.text("settings.filters.expiry")) {
+                    expiryPicker(selection: $globalExpiry, includeDefault: false)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func checkForExternalChange() {
+        guard let selection, selection >= 0, let original else { return }
+        let current = filters
+        if !current.indices.contains(selection) || current[selection] != original {
+            select(nil)
+            conflict = true
+        }
+    }
+
+    private func reset(to preset: QuickFilter) {
+        guard let selection, filters.indices.contains(selection), filters[selection] == original else { return }
+        var current = filters
+        current[selection] = preset
+        persist(current)
+        select(selection)
+    }
+
     private func select(_ index: Int?) {
         let current = filters
-        selection = index.flatMap { current.indices.contains($0) ? $0 : nil }
-        original = selection.map { current[$0] }
+        selection = index
+        original = index.flatMap { current.indices.contains($0) ? current[$0] : nil }
+        group = original?.group ?? .quick
+        symbol = original?.icon ?? QuickFilter.symbols[0]
+        prepend = original?.prepend ?? ""
+        append = original?.append ?? ""
+        match = original?.match ?? .both
+        expiry = original?.expiresAfter ?? -1
+        rawEditor = !(original?.query.isEmpty ?? true)
         name = original?.name ?? ""
         query = original?.query ?? ""
         kind = original?.kind
@@ -211,20 +341,25 @@ struct SavedFilterSettings: View {
         if let selection {
             guard current.indices.contains(selection), current[selection] == original else { conflict = true; return }
             current[selection] = draft
-            QuickFilter.save(current, to: preferences)
+            persist(current)
             select(selection)
         } else {
             current.append(draft)
-            QuickFilter.save(current, to: preferences)
+            persist(current)
             select(current.count - 1)
         }
+    }
+
+    private func persist(_ filters: [QuickFilter]) {
+        QuickFilter.save(filters.filter { $0.group == nil }, to: preferences)
+        QuickFilter.saveLibrary(filters.filter { $0.group != nil }, to: preferences)
     }
 
     private func remove() {
         var current = filters
         guard let selection, current.indices.contains(selection), current[selection] == original else { conflict = true; return }
         current.remove(at: selection)
-        QuickFilter.save(current, to: preferences)
+        persist(current)
         select(current.isEmpty ? nil : min(selection, current.count - 1))
     }
 }

@@ -131,4 +131,34 @@ final class SearchAccessoryTests: XCTestCase {
         XCTAssertNil(controller.filters.options.kind)
         XCTAssertEqual(controller.searchField.text, "keep this text")
     }
+    func testFilterLibraryPresetsCanBeEditedAndAppliedWithoutReplacingSearchText() throws {
+        let app = NSApplication.shared
+        let suite = "OilFindFilterLibrary-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+
+        var library = QuickFilter.library(in: preferences)
+        XCTAssertEqual(library.filter { $0.group == .quick }.count, 11)
+        XCTAssertEqual(library.filter { $0.group == .folder }.count, 6)
+        let index = try XCTUnwrap(library.firstIndex { $0.presetID == "pdf" })
+        library[index].name = "My PDFs"
+        library[index].expiresAfter = 300
+        QuickFilter.saveLibrary(library, to: preferences)
+        XCTAssertEqual(QuickFilter.library(in: preferences), library)
+
+        let controller = SearchViewController(snapshot: true, preferences: preferences)
+        _ = controller.view
+        controller.searchField.text = "invoice 2026"
+        let menu = try XCTUnwrap(controller.filters.savedMenu?())
+        let group = try XCTUnwrap(menu.items.first { $0.title == QuickFilter.Group.quick.title }?.submenu)
+        let preset = try XCTUnwrap(group.items.first { $0.title == "My PDFs" })
+        let action = try XCTUnwrap(preset.action)
+        let bar = try XCTUnwrap(controller.panelBody.subviews.compactMap { $0 as? SearchAccessoryBar }.first)
+        XCTAssertTrue(app.sendAction(action, to: preset.target, from: preset))
+        XCTAssertEqual(controller.searchField.text, "invoice 2026")
+        XCTAssertEqual(bar.desiredHeight, 32)
+        XCTAssertTrue(app.sendAction(action, to: preset.target, from: preset))
+        XCTAssertEqual(bar.desiredHeight, 0)
+    }
+
 }

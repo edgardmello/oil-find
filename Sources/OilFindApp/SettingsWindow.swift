@@ -649,7 +649,7 @@ private struct SettingsForm: View {
                         .padding(.bottom, 8)
                 }
                 if page == .filters {
-                    SavedFilterSettings(preferences: model.preferences, window: window)
+                    SavedFilterSettings(preferences: model.preferences, drives: externalDrives, window: window)
                 } else {
                     Form { pageContent }
                     .formStyle(.grouped)
