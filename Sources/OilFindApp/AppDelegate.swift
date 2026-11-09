@@ -199,7 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refreshStashShortcut() {
         if let stashItem { StashShortcut.show.chord(in: .standard).apply(to: stashItem) }
     }
-    @objc private func showStash() { panel.searchController.showStash() }
+    @objc private func showStash() { panel.searchController.toggleStashWindow() }
     @objc func showSettings() { presentSettings() }
     private func presentSettings() {
         topics.refreshProviderAvailability()

@@ -1,7 +1,9 @@
 import AppKit
+import OilFindCore
 
 final class StashWindow: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate {
     private let stash: FileStash
+    private let preferences: UserDefaults
     private let table = NSTableView()
     private let status = NSTextField(labelWithString: "")
     private let copy = NSButton()
@@ -13,8 +15,9 @@ final class StashWindow: NSWindowController, NSTableViewDataSource, NSTableViewD
     private var copying = false
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
 
-    init(stash: FileStash) {
+    init(stash: FileStash, preferences: UserDefaults = .standard) {
         self.stash = stash
+        self.preferences = preferences
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 540, height: 320),
                             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         super.init(window: panel)
@@ -88,6 +91,7 @@ final class StashWindow: NSWindowController, NSTableViewDataSource, NSTableViewD
     deinit { observers.forEach { center, token in center.removeObserver(token) } }
 
     func present() {
+        localize()
         showWindow(nil)
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
@@ -98,6 +102,10 @@ final class StashWindow: NSWindowController, NSTableViewDataSource, NSTableViewD
         window?.title = L10n.text("stash.title")
         copy.title = L10n.text("stash.copy")
         remove.title = L10n.text("stash.remove")
+        let chord = StashShortcut.remove.chord(in: preferences)
+        remove.keyEquivalent = Shortcut.keyEquivalent(chord.keyCode)
+        remove.keyEquivalentModifierMask = HotKey.modifierFlags(chord.modifiers)
+        remove.toolTip = L10n.text("stash.removeSelection") + " (" + StashShortcut.remove.symbols(in: preferences) + ")"
         updateButtons()
     }
 

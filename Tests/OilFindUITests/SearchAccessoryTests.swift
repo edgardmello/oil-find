@@ -4,7 +4,7 @@ import OilFindCore
 @testable import OilFindApp
 
 final class SearchAccessoryTests: XCTestCase {
-    func testAddingAFileExpandsTheStashWithoutTogglingIt() throws {
+    func testStashOpensOnAddAndSupportsToggleAndRemovalShortcuts() throws {
         let app = NSApplication.shared
         let suite = "OilFindStashExpansion-" + UUID().uuidString
         let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -34,7 +34,26 @@ final class SearchAccessoryTests: XCTestCase {
         }
         let stash = try XCTUnwrap(bar.subviews.compactMap { $0 as? InlineStashTable }.first)
         XCTAssertFalse(stash.isHidden)
-        XCTAssertEqual((stash.documentView as? NSTableView)?.numberOfRows, 1)
+        let table = try XCTUnwrap(stash.documentView as? NSTableView)
+        XCTAssertEqual(table.numberOfRows, 1)
+
+        func key(_ action: StashShortcut) throws -> NSEvent {
+            let chord = action.chord(in: preferences)
+            return try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+                                                   modifierFlags: HotKey.modifierFlags(chord.modifiers),
+                                                   timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                                   characters: "", charactersIgnoringModifiers: "", isARepeat: false,
+                                                   keyCode: UInt16(chord.keyCode)))
+        }
+        XCTAssertTrue(controller.handleKey(try key(.show)))
+        XCTAssertTrue(stash.isHidden)
+        XCTAssertTrue(controller.handleKey(try key(.show)))
+        XCTAssertFalse(stash.isHidden)
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        XCTAssertTrue(window.makeFirstResponder(table))
+        XCTAssertTrue(controller.handleKey(try key(.remove)))
+        XCTAssertTrue(stash.isHidden)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("stash-example.txt").path))
     }
 
     func testQuickFilterRestoresSavedFilenameModeAndSortAndReadsLegacyFilters() throws {

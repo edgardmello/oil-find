@@ -31,6 +31,7 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
     var onRemove: ((Set<UUID>) -> Void)?
     var onOpen: (() -> Void)?
     var onDragging: ((Bool) -> Void)?
+    var shortcutPreferences: UserDefaults = .standard
     weak var menuDelegate: NSMenuDelegate?
     var desiredHeight: CGFloat { files.isEmpty ? 0 : CompactFileTable.headerHeight + CGFloat(min(files.count, 6)) * CompactFileTable.rowHeight }
 
@@ -193,6 +194,9 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
         case .open, .reveal:
             if !event.isARepeat { performStashAction(action == .reveal ? 1 : 0) }
             return true
+        case .remove:
+            if !event.isARepeat { performStashAction(5) }
+            return true
         case .trash: return true
         case .up, .down, .extendUp, .extendDown, .pageUp, .pageDown, .home, .end, .first, .last:
             return false
@@ -203,11 +207,18 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
     private func makeStashMenu() -> NSMenu {
         let menu = NSMenu()
         menu.delegate = menuDelegate
+        menu.autoenablesItems = false
         for (tag, key) in ["panel.copyStash", "panel.openStashWindow"].enumerated() {
             let item = menu.addItem(withTitle: L10n.text(key, String(files.count)), action: #selector(stashHeaderAction(_:)), keyEquivalent: "")
             item.target = self
             item.tag = tag
         }
+        menu.addItem(.separator())
+        let remove = menu.addItem(withTitle: L10n.text("stash.removeSelection"), action: #selector(stashMenuAction(_:)), keyEquivalent: "")
+        remove.target = self
+        remove.tag = 5
+        StashShortcut.remove.chord(in: shortcutPreferences).apply(to: remove)
+        remove.isEnabled = !selection.isEmpty
         return menu
     }
 
@@ -219,7 +230,7 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = menuDelegate
-        for (index, key) in ["ctx.open", "ctx.reveal", "ctx.copyFiles", "ctx.copyPaths", "ctx.copyNames", "stash.remove"].enumerated() {
+        for (index, key) in ["ctx.open", "ctx.reveal", "ctx.copyFiles", "ctx.copyPaths", "ctx.copyNames", "stash.removeSelection"].enumerated() {
             if index == 2 || index == 5 { menu.addItem(.separator()) }
             if index == 3 || index == 4 {
                 FileClipboardFormat.addMenu(to: menu, titleKey: key,
@@ -230,6 +241,7 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
             let item = menu.addItem(withTitle: L10n.text(key), action: #selector(stashMenuAction(_:)), keyEquivalent: "")
             item.target = self
             item.tag = index
+            if index == 5 { StashShortcut.remove.chord(in: shortcutPreferences).apply(to: item) }
             item.isEnabled = index >= 3 || selection.allSatisfy { metadata[$0.id] != nil }
         }
         return menu
