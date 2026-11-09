@@ -33,6 +33,28 @@ final class SearchAppearanceTests: XCTestCase {
         XCTAssertFalse(controller.panelBody.isHidden)
     }
 
+    func testExpandedBarKeepsCompactToolbarAndFileTypeSelection() throws {
+        _ = NSApplication.shared
+        let suite = "OilFindCompactToolbar-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        preferences.set(SearchInterface.bar.rawValue, forKey: SearchInterface.key)
+        let controller = SearchViewController(snapshot: false, preferences: preferences)
+        _ = controller.view
+        controller.searchField.text = "report"
+        controller.startSearch()
+        XCTAssertFalse(controller.barCollapsed)
+        XCTAssertEqual(controller.filters.preferredHeight, 36)
+        controller.filters.select(3)
+        XCTAssertEqual(controller.filters.options.kind, 3)
+
+        preferences.set(SearchInterface.window.rawValue, forKey: SearchInterface.key)
+        controller.applySearchSetting(SearchInterface.key)
+        XCTAssertEqual(controller.filters.preferredHeight, FilterBar.toolbarHeight)
+        XCTAssertEqual(controller.filters.options.kind, 3)
+        XCTAssertEqual(controller.searchField.text, "report")
+    }
+
     func testStatusVisibilityIsIndependentForWindowAndSearchBar() throws {
         _ = NSApplication.shared
         let suite = "OilFindStatus-" + UUID().uuidString

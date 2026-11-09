@@ -26,7 +26,7 @@ enum Snapshot {
         defer { L10n.snapshotChinese = nil }
         appExtension?.languageDidChange(chinese: L10n.chinese)
         let state = values["--state"] ?? "results"
-        guard ["search-bar", "results", "stash", "recent", "empty", "indexing", "welcome", "toast", "settings", "menu", "no-access", "diagnostic", "syntax", "update-available", "update-downloading", "update-failed", "update-latest"].contains(state) else { throw SnapshotError.failed("Invalid state: \(state)") }
+        guard ["search-bar-expanded", "search-bar", "results", "stash", "recent", "empty", "indexing", "welcome", "toast", "settings", "menu", "no-access", "diagnostic", "syntax", "update-available", "update-downloading", "update-failed", "update-latest"].contains(state) else { throw SnapshotError.failed("Invalid state: \(state)") }
         let appearance = values["--appearance"] ?? "light"
         guard ["light", "dark"].contains(appearance) else { throw SnapshotError.failed("Invalid appearance: \(appearance)") }
         let filter = values["--filter"] ?? "all"
@@ -153,9 +153,9 @@ enum Snapshot {
         panel.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
         let controller = panel.searchController
         if state == "search-bar" {
-            controller.prepareCollapsedBarSnapshot()
+            controller.prepareSearchBarSnapshot()
             let view = controller.view
-            view.frame = NSRect(x: 0, y: 0, width: Theme.panelSize.width, height: SearchPanel.collapsedHeight)
+            view.frame = NSRect(x: 0, y: 0, width: SearchInterface.bar.expandedSize(preview: false).width, height: SearchPanel.collapsedHeight)
             view.layoutSubtreeIfNeeded()
             try write(view: view, appearance: panel.appearance, output: output)
             return
@@ -163,11 +163,12 @@ enum Snapshot {
         controller.supplementaryProvider = appExtension?.supplementarySearchProvider
         controller.additionalSearchProvider = topicSearch
         try controller.prepareSnapshot(state: state, query: values["--query"] ?? "readme", options: SearchOptions(sort: key, ascending: key == .name, kind: kind == 0 || filter == "additional" ? nil : UInt8(kind)), store: store, selection: selection, additionalSources: externalDrives.searchSources() + (appExtension?.searchSources() ?? []), additionalOnly: filter == "additional")
+        if state == "search-bar-expanded" { controller.prepareSearchBarSnapshot() }
         let view = controller.view
         if compactTable { controller.results.setCompact(true) }
         if state == "stash" { controller.prepareStashSnapshot() }
         if inlinePreview { controller.setInlinePreviewVisible(true) }
-        view.frame = NSRect(origin: .zero, size: inlinePreview ? panel.frame.size : Theme.panelSize)
+        view.frame = NSRect(origin: .zero, size: state == "search-bar-expanded" ? SearchInterface.bar.expandedSize(preview: inlinePreview) : (inlinePreview ? panel.frame.size : Theme.panelSize))
         view.layoutSubtreeIfNeeded(); view.displayIfNeeded()
         let deadline = Date().addingTimeInterval(1)
         while (inlinePreview || !controller.results.icons.isIdle) && Date() < deadline {
