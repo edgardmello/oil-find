@@ -7,6 +7,7 @@ struct QuickFilter: Codable {
     let folder: String?
     let volume: String?
     let hiddenOnly: Bool
+    var fuzzyNames: Bool? = nil
 
     private static let key = "savedQuickFilters"
 
