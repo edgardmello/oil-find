@@ -32,7 +32,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private var coverageExplanation: CoverageExplanation?
     private let snapshot: Bool
     private let preferences: UserDefaults
-    private var searchInterface: SearchInterface = .window
+    private(set) var searchInterface: SearchInterface = .window
     let panelBody = FlippedView()
     private var barExpandedManually = false
     private(set) var barCollapsed = false
@@ -284,7 +284,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         panelBody.frame = view.bounds
         searchField.frame = NSRect(x: 0, y: 0, width: w, height: 64)
         topLine.frame = NSRect(x: 0, y: 64, width: w, height: px)
-        filters.frame = NSRect(x: 0, y: 64 + px, width: w, height: FilterBar.toolbarHeight)
+        filters.frame = NSRect(x: 0, y: 64 + px, width: w, height: filters.preferredHeight)
         let belowFilters = filters.frame.maxY
         let accessoryHeight = syntaxVisible ? 0 : accessories.desiredHeight
         accessories.isHidden = syntaxVisible || accessoryHeight == 0
@@ -630,6 +630,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     private func refreshStyle() {
         searchInterface = SearchInterface(rawValue: preferences.string(forKey: SearchInterface.key) ?? "") ?? .window
+        filters.compactToolbar = searchInterface == .bar
         (view as? PanelSurface)?.material = SearchMaterial(rawValue: preferences.string(forKey: SearchMaterial.key) ?? "") ?? .glassy
         let scale = CGFloat(min(125, max(85, preferences.object(forKey: "searchTextSize") as? Int ?? 100))) / 100
         searchField.textScale = scale
@@ -663,7 +664,11 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             if key == SearchInterface.key { barExpandedManually = false }
             refreshStyle()
             if let result = results.result { updateFooter(result) }
-            syncBarPresentation()
+            if key == SearchInterface.key {
+                syncBarPresentation(resize: false)
+                view.needsLayout = true
+                (view.window as? SearchPanel)?.resizeForInlinePreview()
+            }
             return
         }
         switch key {
@@ -992,10 +997,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         return L10n.text(partial ? "footer.partial" : "footer.results", count, duration)
     }
     #if DEBUG
-    func prepareCollapsedBarSnapshot() {
+    func prepareSearchBarSnapshot() {
         view.layoutSubtreeIfNeeded()
         searchInterface = .bar
+        filters.compactToolbar = true
         syncBarPresentation(resize: false)
+        view.needsLayout = true
     }
     #endif
 

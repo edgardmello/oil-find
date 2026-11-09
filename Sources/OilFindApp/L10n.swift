@@ -359,6 +359,7 @@ enum L10n {
         "settings.interface.title": ("界面", "Interface"),
         "settings.interface.window": ("搜索窗口", "Search Window"),
         "settings.interface.bar": ("搜索栏", "Search Bar"),
+        "settings.interface.fileType": ("文件类型：%@", "File Type: %@"),
         "settings.interface.expand": ("展开搜索结果", "Expand Search Results"),
         "settings.interface.defaultResults": ("默认结果", "Default Results"),
         "settings.interface.recent": ("最近的文件", "Recent Files"),

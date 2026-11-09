@@ -116,8 +116,9 @@ final class SearchPanel: NSPanel {
         }
         guard let screen = target ?? NSScreen.main else { return }
         let visible = screen.visibleFrame
-        let width = min(searchController.inlinePreviewVisible && !searchController.barCollapsed ? 1160 : 800, visible.width - 80)
-        let expandedHeight = min(560, visible.height - 120)
+        let size = searchController.searchInterface.expandedSize(preview: searchController.inlinePreviewVisible && !searchController.barCollapsed)
+        let width = min(size.width, visible.width - 80)
+        let expandedHeight = min(size.height, visible.height - 120)
         let height = searchController.barCollapsed ? Self.collapsedHeight : expandedHeight
         let top = (visible.midY + expandedHeight / 2).rounded()
         let frame = NSRect(x: (visible.midX - width / 2).rounded(), y: top - height,

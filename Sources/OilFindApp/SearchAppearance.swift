@@ -5,6 +5,13 @@ enum SearchInterface: String, CaseIterable {
     static let key = "searchInterface"
 
     var title: String { L10n.text("settings.interface." + rawValue) }
+
+    func expandedSize(preview: Bool) -> NSSize {
+        switch self {
+        case .window: return NSSize(width: preview ? 1160 : 800, height: 560)
+        case .bar: return NSSize(width: preview ? 920 : 640, height: 410)
+        }
+    }
 }
 
 enum SearchMaterial: String, CaseIterable {
