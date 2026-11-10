@@ -18,7 +18,9 @@ const manifest = {
   version, build: Number(value('CFBundleVersion')),
   url: `https://find.oiloil.org/downloads/Oil-Find-${version}.zip`,
   size: (await stat(archive)).size, sha256: hash.digest('hex'),
-  minimumSystemVersion: value('LSMinimumSystemVersion'), published: release.date, notes: release.notes,
+  minimumSystemVersion: value('LSMinimumSystemVersion'), published: release.date,
+  // The app manifest is English-only; the bilingual notes stay on the website.
+  notes: release.notes.en,
 };
 const temporary = `${output}.tmp`;
 try {
