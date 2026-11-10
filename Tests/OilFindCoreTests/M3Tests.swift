@@ -36,21 +36,18 @@ final class M3Tests: XCTestCase {
             calendar.date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))!
         }
         let now = date(2026, 9, 30, 16)
-        let examples: [(Date, String, String)] = [
-            (date(2026, 9, 30, 14, 32), "今天 14:32", "Today 14:32"),
-            (date(2026, 9, 29, 9, 10), "昨天 09:10", "Yesterday 09:10"),
-            (date(2026, 3, 12), "3月12日", "Mar 12"),
-            (date(2024, 3, 12), "2024/3/12", "2024/3/12")
+        let examples: [(Date, String)] = [
+            (date(2026, 9, 30, 14, 32), "Today 14:32"),
+            (date(2026, 9, 29, 9, 10), "Yesterday 09:10"),
+            (date(2026, 3, 12), "Mar 12"),
+            (date(2024, 3, 12), "2024/3/12")
         ]
-        for (value, zh, en) in examples {
-            XCTAssertEqual(Presentation.dateText(value, now: now, calendar: calendar, chinese: true), zh)
-            XCTAssertEqual(Presentation.dateText(value, now: now, calendar: calendar, chinese: false), en)
+        for (value, expected) in examples {
+            XCTAssertEqual(Presentation.dateText(value, now: now, calendar: calendar), expected)
         }
-        for chinese in [true, false] {
-            XCTAssertEqual(Presentation.dateText(date(2025, 12, 31, 23, 59), now: date(2026, 1, 1), calendar: calendar, chinese: chinese), chinese ? "昨天 23:59" : "Yesterday 23:59")
-            XCTAssertEqual(Presentation.dateText(date(2025, 12, 30), now: date(2026, 1, 1), calendar: calendar, chinese: chinese), "2025/12/30")
-            XCTAssertEqual(Presentation.dateText(date(2026, 9, 30), now: date(2026, 9, 30, 0, 1), calendar: calendar, chinese: chinese), chinese ? "今天 00:00" : "Today 00:00")
-        }
+        XCTAssertEqual(Presentation.dateText(date(2025, 12, 31, 23, 59), now: date(2026, 1, 1), calendar: calendar), "Yesterday 23:59")
+        XCTAssertEqual(Presentation.dateText(date(2025, 12, 30), now: date(2026, 1, 1), calendar: calendar), "2025/12/30")
+        XCTAssertEqual(Presentation.dateText(date(2026, 9, 30), now: date(2026, 9, 30, 0, 1), calendar: calendar), "Today 00:00")
     }
 
     func testT42Abbreviate() {

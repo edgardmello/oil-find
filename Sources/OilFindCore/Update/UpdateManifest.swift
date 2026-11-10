@@ -68,11 +68,6 @@ public enum UpdateFailure: String, Error {
 }
 
 public struct UpdateManifest: Codable, Equatable {
-    public struct Notes: Codable, Equatable {
-        public let zh: [String]
-        public let en: [String]
-        public init(zh: [String], en: [String]) { self.zh = zh; self.en = en }
-    }
     public let version: String
     public let build: Int
     public let url: URL
@@ -80,7 +75,7 @@ public struct UpdateManifest: Codable, Equatable {
     public let sha256: String
     public let minimumSystemVersion: String
     public let published: String
-    public let notes: Notes
+    public let notes: [String]
     public var release: UpdateVersion { UpdateVersion(version, build: build)! }
 
     public static func parse(_ data: Data, allowLocalhost: Bool = false) throws -> Self {
@@ -89,8 +84,8 @@ public struct UpdateManifest: Codable, Equatable {
               value.sha256.count == 64, value.sha256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
               systemComponents(value.minimumSystemVersion) != nil,
               value.published.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil,
-              !value.notes.zh.isEmpty, !value.notes.en.isEmpty,
-              (value.notes.zh + value.notes.en).allSatisfy({ !$0.isEmpty && $0.utf8.count <= 16_384 }),
+              !value.notes.isEmpty,
+              value.notes.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 16_384 }),
               validURL(value.url, allowLocalhost: allowLocalhost) else { throw UpdateFailure.other }
         return value
     }

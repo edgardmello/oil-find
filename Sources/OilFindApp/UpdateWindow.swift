@@ -11,7 +11,7 @@ private struct UpdateView: View {
                 Text(L10n.text("update.latest.body", model.runningVersion.version.text)).foregroundStyle(.secondary)
             } else if let manifest = model.manifest {
                 Text(L10n.text("update.available.current", model.runningVersion.version.text)).foregroundStyle(.secondary)
-                let notes = L10n.chinese ? manifest.notes.zh : manifest.notes.en
+                let notes = manifest.notes
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(Array(notes.enumerated()), id: \.offset) { _, note in
@@ -58,7 +58,7 @@ private struct UpdateView: View {
         return model.manifest.map { L10n.text("update.available.title", $0.version) } ?? L10n.text("update.check")
     }
     private var notesHeight: CGFloat {
-        let notes = model.manifest.map { L10n.chinese ? $0.notes.zh : $0.notes.en } ?? []
+        let notes = model.manifest.map { $0.notes } ?? []
         guard notes.count > 2 else { return 96 }
         let visible = notes.prefix(6)
         let height = visible.reduce(CGFloat(0)) { result, note in
@@ -76,20 +76,14 @@ private struct UpdateView: View {
 
 final class UpdateWindowController: NSWindowController, NSWindowDelegate {
     private let model: UpdateManager
-    private var languageObserver: NSObjectProtocol?
     init(model: UpdateManager) {
         self.model = model
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 330), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = L10n.text("update.check"); window.isReleasedWhenClosed = false
         super.init(window: window)
         window.contentViewController = NSHostingController(rootView: UpdateView(model: model)); window.delegate = self
-        languageObserver = NotificationCenter.default.addObserver(forName: L10n.changed, object: nil, queue: .main) { [weak self] _ in
-            self?.window?.title = L10n.text("update.check")
-            self?.model.objectWillChange.send()
-        }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func present() { window?.center(); window?.makeKeyAndOrderFront(nil) }
     func windowShouldClose(_ sender: NSWindow) -> Bool { !model.state.installing }
-    deinit { if let languageObserver { NotificationCenter.default.removeObserver(languageObserver) } }
 }

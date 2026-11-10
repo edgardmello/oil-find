@@ -55,7 +55,6 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private let generation = SearchGeneration(), cache = SearchCache()
     private var timer: Timer?
     private var stateView: NSView?
-    private var languageObserver: NSObjectProtocol?
     private var menuTracking = false, dragging = false, footerShowsSelection = false
     private var trashing: Set<URL> = []
     private var selectionAnchor: (sourceID: String, store: IndexStore, id: UInt32, path: String)?
@@ -97,7 +96,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if filters.additionalSelected {
             searchField.placeholder = additionalSearchProvider?.placeholder
         } else if preferences.bool(forKey: "showSearchHints") {
-            let examples = L10n.chinese ? SyntaxReference.zh : SyntaxReference.en
+            let examples = SyntaxReference.examples
             searchField.placeholder = L10n.text("settings.search.example", examples[searchHintIndex % examples.count][0])
         } else {
             searchField.placeholder = nil
@@ -280,7 +279,6 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         footer.onActions = { [weak self] anchor in self?.showActions(anchoredTo: anchor) }
         footer.onStash = { [weak self] in self?.toggleStash() }
         footer.onSettings = { [weak self] in self?.onSettings?() }
-        languageObserver = NotificationCenter.default.addObserver(forName: L10n.changed, object: nil, queue: .main) { [weak self] _ in self?.localize() }
         setState(.indexing)
         if !snapshot {
             filters.options = SettingsPreferences.searchOptions(in: preferences, recent: true)
@@ -291,7 +289,6 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
     deinit {
         timer?.invalidate()
-        if let languageObserver { NotificationCenter.default.removeObserver(languageObserver) }
     }
     private func localize() {
         footer.spacePreview = spaceOpensQuickLook

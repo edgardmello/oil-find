@@ -135,7 +135,7 @@ final class ResultCell: NSTableCellView {
             }
             detailLabel.attributedStringValue = text
         }
-        dateLabel.stringValue = compact ? CompactFileTable.date(item.modified) : Presentation.dateText(item.modified, now: Date(), calendar: .current, chinese: L10n.chinese)
+        dateLabel.stringValue = compact ? CompactFileTable.date(item.modified) : Presentation.dateText(item.modified, now: Date(), calendar: .current)
         sizeLabel.stringValue = item.kind == 2 ? L10n.text("meta.app") : item.flags & SiftFlag.dir != 0 && item.flags & SiftFlag.package == 0 ? L10n.text("meta.folder") : Presentation.sizeText(item.size)
         toolTip = item.detail.map { "\(item.path)\n\n\($0.presentation.text)" } ?? item.path
         icon.image = icons.icon(name: item.name, path: item.path, flags: item.flags, kind: item.kind, resolveFileIcon: item.source.isOnline) { [weak self] image in
@@ -164,7 +164,7 @@ final class ResultCell: NSTableCellView {
         nameLabel.attributedStringValue = highlighted(item.title, font: nameLabel.font!, color: .labelColor)
         detailLabel.isHidden = true; detailLabel.stringValue = ""
         pathLabel.attributedStringValue = highlighted(item.detail, font: pathLabel.font!, color: .secondaryLabelColor)
-        dateLabel.stringValue = compact ? CompactFileTable.date(item.modified) : Presentation.dateText(item.modified, now: Date(), calendar: .current, chinese: L10n.chinese)
+        dateLabel.stringValue = compact ? CompactFileTable.date(item.modified) : Presentation.dateText(item.modified, now: Date(), calendar: .current)
         sizeLabel.stringValue = item.location; sizeLabel.lineBreakMode = .byTruncatingMiddle
         icon.image = item.icon; toolTip = item.location + "\n" + item.detail; needsLayout = true
     }

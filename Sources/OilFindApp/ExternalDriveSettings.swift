@@ -3,7 +3,6 @@ import SwiftUI
 
 struct ExternalDriveSettings: View {
     @ObservedObject var catalog: ExternalDriveCatalog
-    var chinese: Bool
     var window: () -> NSWindow?
     private func text(_ key: String, _ argument: String = "") -> String { L10n.text(key, argument) }
     var body: some View {
@@ -51,14 +50,14 @@ struct ExternalDriveSettings: View {
         return NSImage(systemSymbolName: "externaldrive", accessibilityDescription: nil) ?? NSImage()
     }
     private func status(_ row: ExternalDriveCatalog.Row) -> String {
-        let locale = Locale(identifier: chinese ? "zh_CN" : "en_US")
+        let locale = Locale(identifier: "en_US")
         switch row.status {
         case .connected, .indexing:
             let number = NumberFormatter(); number.locale = locale; number.numberStyle = .decimal
             return text(row.status == .connected ? "driveConnected" : "driveIndexing",
                         number.string(from: NSNumber(value: row.count)) ?? String(row.count))
         case .offline:
-            let date = DateFormatter(); date.locale = locale; date.dateFormat = chinese ? "M月d日" : "MMM d"
+            let date = DateFormatter(); date.locale = locale; date.dateFormat = "MMM d"
             return text("driveOffline", date.string(from: row.record.lastConnected))
         case .disabled: return text("driveDisabled")
         }

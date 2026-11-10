@@ -189,11 +189,7 @@ final class ExternalDriveTests: XCTestCase {
         catalog.updateMounted([volume]); XCTAssertTrue(catalog.rows.isEmpty)
         catalog.updateMounted([]); catalog.updateMounted([volume])
         XCTAssertEqual(catalog.rows.count, 1); XCTAssertEqual(indexes.count, 2)
-        L10n.snapshotChinese = true
-        XCTAssertEqual(L10n.text("driveRemoveTitle", "T7 Shield"), "移除「T7 Shield」？")
-        L10n.snapshotChinese = false
         XCTAssertEqual(L10n.text("driveRemoveTitle", "T7 Shield"), "Remove “T7 Shield”?")
-        L10n.snapshotChinese = nil
     }
 
     func testProgressDoesNotInvalidateSearchUntilSourceStoreOrOnlineStateChanges() throws {

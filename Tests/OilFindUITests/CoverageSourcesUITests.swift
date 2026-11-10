@@ -9,9 +9,8 @@ final class CoverageSourcesUITests: XCTestCase {
     private final class Extension: ApplicationExtension {
         var sources: [SearchSource] = []
         func searchSources() -> [SearchSource] { sources }
-        func start(chinese: Bool, showSettings: @escaping () -> Void) {}
+        func start(showSettings: @escaping () -> Void) {}
         func stop() {}
-        func languageDidChange(chinese: Bool) {}
         func handle(_ url: URL) {}
         func settingsSection(window: @escaping () -> NSWindow?) -> AnyView { AnyView(EmptyView()) }
     }
@@ -68,14 +67,10 @@ final class CoverageSourcesUITests: XCTestCase {
             while model.explanation == nil && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
             XCTAssertEqual(model.explanation, expected)
         }
-        L10n.snapshotChinese = true
-        check("它在「Archive」上，这块磁盘现在没有连接。")
-        L10n.snapshotChinese = false
         check("It’s on “Archive”, which isn’t connected right now.")
         let store = IndexStore(scan: ScanOutput(buffers: [], count: 1, homeIndex: .max, elapsed: 0, finishedAt: 0), config: .init(rootPath: root))
         model.additionalSources = { [SearchSource(id: "archive", displayName: "Archive", isOnline: false, store: store, explainPath: { _ in .pending })] }
         check(L10n.explanation(.pending))
-        L10n.snapshotChinese = nil
     }
 
 }

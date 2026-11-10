@@ -1,24 +1,26 @@
 # Oil Find
 
-免费开源的 macOS 原生文件搜索工具（苹果版的 Everything），按 ⇧⌘F 唤起搜索面板。架构与索引不变量见 `docs/ARCHITECTURE.md`。
+Ferramenta nativa de busca de arquivos para macOS, gratuita e de código aberto (o "Everything" do Mac); o painel de busca abre com ⇧⌘F. A arquitetura e os invariantes do índice estão em `docs/ARCHITECTURE.md`.
 
-## 目录
+## Diretórios
 
-- `Sources/COilFind/`：C 批量目录读取、名称比较与搜索评分。
-- `Sources/OilFindCore/`：扫描、索引、查询、实时更新、持久化和应用更新。
-- `Sources/OilFindApp/`：AppKit 应用库与 SwiftUI 设置；免费界面文案集中在 `L10n.swift`，中性扩展点为 `ApplicationExtension`。
-- `Sources/OilFind/main.swift`：可执行应用的组装入口。
-- `Sources/oilfind-cli/`：命令行验证工具。
-- `Tests/`：核心引擎、应用界面与脚本测试。
-- `Resources/`：应用元数据和图标。
-- `scripts/`：构建、打包、安装与卸载。
-- `site/`：Next.js App Router 官网、搜索演示、更新日志与静态更新清单。
+- `Sources/COilFind/`: leitura de diretórios em lote em C, comparação de nomes e pontuação da busca.
+- `Sources/OilFindCore/`: varredura, índice, consultas, atualizações em tempo real, persistência e atualização do aplicativo.
+- `Sources/OilFindApp/`: biblioteca AppKit do app e configurações em SwiftUI; os textos da interface ficam em `L10n.swift` (somente inglês), e o ponto de extensão neutro é `ApplicationExtension`.
+- `Sources/OilFind/main.swift`: ponto de montagem do app executável.
+- `Sources/oilfind-cli/`: ferramenta de linha de comando para validação.
+- `Tests/`: testes do motor, da interface do app e de scripts.
+- `Resources/`: metadados do app e ícone.
+- `build.sh`: entrada interativa de build (bump de versão, limpeza, preflight; `install` instala em /Applications para uso em produção).
+- `scripts/`: build, empacotamento, instalação e desinstalação.
+- `site/`: site oficial em Next.js App Router, demonstração de busca, changelog e manifest estático de atualizações.
 
-## 构建与测试
+## Build e testes
 
-部署目标 macOS 14，面向 Apple 芯片。
+Deployment target macOS 14, voltado a Apple silicon.
 
 ```sh
+./build.sh
 swift build -c release
 swift test
 python3 Tests/Scripts/test_uninstall.py
@@ -28,9 +30,9 @@ scripts/build-app.sh --debug
 scripts/package.sh
 ```
 
-`Pro/` 保留内部模块的目录名称。个人分支只有一个构建，始终包含内容搜索，不提供应用内更新检查。
+`Pro/` mantém o nome de diretório dos módulos internos. A branch pessoal tem um único build, que sempre inclui a busca de conteúdo e não oferece checagem de atualização dentro do app.
 
-官网使用 Node.js 22 与 pnpm：
+O site usa Node.js 22 e pnpm:
 
 ```sh
 cd site
@@ -40,13 +42,13 @@ pnpm test
 pnpm build
 ```
 
-## 约定
+## Convenções
 
-- 应用使用 Swift 5 语言模式与一个 C target，只用系统框架，不引入第三方包。
-- 公开应用库与核心不得依赖私有模块，只通过中性的 `ApplicationExtension` 接入。仅 `Package.swift` 和 `Sources/OilFind/main.swift` 可提及私有 target，分别用于声明依赖与组装；入口不解析私有功能状态或参数。扩展提供启动、退出、设置分区、URL、语言接口，DEBUG 下可预处理并移除自身参数。
-- 扫描、搜索、事件处理热路径使用 Unsafe 指针和 SoA 布局，不创建 String，不逐项堆分配。
-- 代码注释用英文。修改界面文案时维护 `L10n.swift` 中的中英文对应项。
-- 索引文件只保留一份，临时文件用完即删。没有完全磁盘访问权限时静默跳过 EPERM 目录。
-- 界面验证使用调试版 `--snapshot`；正式版不包含该入口。
-- 官网使用 TypeScript、React 和 Next.js，运行时依赖为 `next`、`react`、`react-dom`、`@vercel/analytics`、`stripe`（授权接口用）；npm 与 pnpm 锁文件保持一致。
-- 不提交环境文件、密钥、下载包、索引或构建产物。CI 通过 `CI=true` 跳过时间敏感或依赖本机真实索引的测试，本地照常运行。
+- O app usa o modo de linguagem Swift 5 e um target C; apenas frameworks do sistema, sem pacotes de terceiros.
+- A biblioteca pública do app e o core não podem depender de módulos privados; a integração é feita somente pela interface neutra `ApplicationExtension`. Apenas `Package.swift` e `Sources/OilFind/main.swift` podem mencionar targets privados, para declarar dependências e montar; a entrada não resolve estado nem parâmetros de funcionalidades privadas. A extensão fornece as interfaces de inicialização, encerramento, seção de configurações e URL; em DEBUG os próprios parâmetros podem ser pré-processados e removidos.
+- Os caminhos quentes de varredura, busca e tratamento de eventos usam ponteiros Unsafe e layout SoA, sem criar String nem alocação em heap por item.
+- Comentários de código em inglês. Os textos da interface ficam somente em inglês, no dicionário `L10n.swift`.
+- Existe um único arquivo de índice; arquivos temporários são apagados após o uso. Sem a permissão de Acesso Total ao Disco, diretórios com EPERM são silenciosamente ignorados.
+- A validação da interface usa `--snapshot` na build de debug; a release não inclui essa entrada.
+- O site usa TypeScript, React e Next.js; as dependências de runtime são `next`, `react`, `react-dom`, `@vercel/analytics` e `stripe` (para a API de licenciamento); os lockfiles de npm e pnpm devem permanecer em sincronia.
+- Não versionar arquivos de ambiente, segredos, pacotes baixados, índices ou artefatos de build. O CI usa `CI=true` para pular testes sensíveis a tempo ou que dependam do índice real da máquina; localmente eles rodam normalmente.

@@ -35,7 +35,6 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
     /// Store versions and settings of the last background sync that ran to completion.
     /// Lets idle triggers (panel hidden, primary index settled) skip a full catalog walk when nothing changed.
     private var lastCompletedSyncSignature: String?
-    private var chinese = false
 
     private static let spotlightCacheLock = NSLock()
     private static var spotlightCache: [String: (timestamp: CFAbsoluteTime, paths: [String])] = [:]
@@ -66,12 +65,6 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
             self.indexedFileCount = currentStats.fileCount
             self.diskBytes = currentStats.diskBytes
         }
-    }
-
-    public func setLanguage(chinese: Bool) {
-        lock.lock()
-        self.chinese = chinese
-        lock.unlock()
     }
 
     public func setEnabled(_ value: Bool) {
@@ -172,10 +165,6 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
     }
 
     private func snippetPrefix() -> String {
-        lock.lock()
-        let useChinese = chinese
-        lock.unlock()
-        if useChinese { return "包含：" }
         let preferred = Locale.preferredLanguages.first?.lowercased() ?? "en"
         if preferred.hasPrefix("pt") { return "Contém: " }
         return "Contains: "

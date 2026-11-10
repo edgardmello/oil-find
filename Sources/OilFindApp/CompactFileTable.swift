@@ -17,7 +17,7 @@ enum CompactFileTable {
     }
 
     static func date(_ date: Date) -> String {
-        (L10n.chinese ? chineseDate : englishDate).string(from: date)
+        englishDate.string(from: date)
     }
 
     private static func formatter(locale: String, format: String) -> DateFormatter {
@@ -28,7 +28,6 @@ enum CompactFileTable {
     }
 
     private static let englishDate = formatter(locale: "en_US_POSIX", format: "dd MMM yyyy 'at' HH:mm")
-    private static let chineseDate = formatter(locale: "zh_CN", format: "yyyy-MM-dd HH:mm")
 }
 
 final class CompactFileHeader: NSTableHeaderView {

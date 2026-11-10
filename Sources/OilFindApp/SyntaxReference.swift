@@ -8,46 +8,39 @@ private final class SyntaxRow: NSButton {
     override func hitTest(_ point: NSPoint) -> NSView? { bounds.contains(convert(point, from: superview)) ? self : nil }
 }
 final class SyntaxReference: FlippedView {
-    static let zh = [
-        ["wd", "拼音首字母，找到「文档」", "拼音"],
-        ["readme !node_modules", "包含 readme，排除 node_modules 里的", "排除"],
-        ["*.png", "通配符，匹配整个名称", "通配"],
-        ["~/Desktop/ png", "只在桌面下面找", "路径"],
-        ["dm:today ext:md", "今天改过的 Markdown", "时间"]
-    ]
-    static let en = [
+    static let examples = [
         ["wd", "Pinyin initials, finds 文档", "Pinyin"],
         ["readme !node_modules", "Contains readme, not inside node_modules", "Exclude"],
         ["*.png", "Wildcard, matches the whole name", "Wildcard"],
         ["~/Desktop/ png", "Only under the Desktop", "Path"],
         ["dm:today ext:md", "Markdown files changed today", "Date"]
     ]
-    private static let more = [
-        ("fuzzy:rdm", "按顺序匹配文件名字符", "Match filename letters in order"),
-        ("'report", "连续匹配文本", "Match contiguous text"),
-        ("vacation photos", "每个词都必须匹配", "Match every word"),
-        ("foo | bar", "匹配任意一个词", "Match either term"),
-        (".jpg .png", "匹配任一扩展名", "Match either extension"),
-        ("ext:pdf;docx", "按扩展名筛选", "Filter by extension"),
-        ("in:Documents", "只在指定文件夹内搜索", "Search inside a folder"),
-        ("depth:2", "最多向下搜索两层", "Search up to two folder levels"),
-        ("folder:photos", "只查找匹配的文件夹", "Find matching folders"),
-        ("file:", "只查找文件", "Find files only"),
-        ("Photos/", "查找文件夹内的项目", "Find items inside Photos"),
-        ("size:>10mb", "按大小筛选", "Filter by file size"),
-        ("modified:7d", "最近七天修改的项目", "Modified in the past seven days"),
-        ("dm:lastweek", "上周修改的项目", "Modified last week"),
-        ("dm:2025-01..2025-03", "按修改日期范围筛选", "Filter by modification date range"),
-        ("^report", "名称以 report 开头", "Name starts with report"),
-        ("report$", "名称以 report 结尾，可带扩展名", "Name ends in report, with optional extension"),
-        ("!.zip", "排除 ZIP 文件", "Exclude ZIP files"),
-        ("!Backups/", "排除文件夹里的项目", "Exclude items inside Backups"),
-        ("!/", "排除文件夹结果", "Exclude folders from results"),
-        ("invoice [client]", "在发票文件内搜索文字", "Find text inside matching files"),
-        ("[invoice|receipt]", "内容匹配任意一项", "Match either term inside the file"),
-        ("content:\"paid invoice\"", "按短语搜索文件内容", "Find a phrase in file contents"),
-        ("#work", "按访达标签搜索（需启用内容索引）", "Find Finder tags with content indexing enabled"),
-        ("regex:^IMG_\\d+", "正则表达式", "Regular expression")
+    private static let more: [(String, String)] = [
+        ("fuzzy:rdm", "Match filename letters in order"),
+        ("'report", "Match contiguous text"),
+        ("vacation photos", "Match every word"),
+        ("foo | bar", "Match either term"),
+        (".jpg .png", "Match either extension"),
+        ("ext:pdf;docx", "Filter by extension"),
+        ("in:Documents", "Search inside a folder"),
+        ("depth:2", "Search up to two folder levels"),
+        ("folder:photos", "Find matching folders"),
+        ("file:", "Find files only"),
+        ("Photos/", "Find items inside Photos"),
+        ("size:>10mb", "Filter by file size"),
+        ("modified:7d", "Modified in the past seven days"),
+        ("dm:lastweek", "Modified last week"),
+        ("dm:2025-01..2025-03", "Filter by modification date range"),
+        ("^report", "Name starts with report"),
+        ("report$", "Name ends in report, with optional extension"),
+        ("!.zip", "Exclude ZIP files"),
+        ("!Backups/", "Exclude items inside Backups"),
+        ("!/", "Exclude folders from results"),
+        ("invoice [client]", "Find text inside matching files"),
+        ("[invoice|receipt]", "Match either term inside the file"),
+        ("content:\"paid invoice\"", "Find a phrase in file contents"),
+        ("#work", "Find Finder tags with content indexing enabled"),
+        ("regex:^IMG_\\\\d+", "Regular expression")
     ]
     private static let moreTag = 100
     var onExample: ((String) -> Void)?
@@ -57,9 +50,9 @@ final class SyntaxReference: FlippedView {
     private var buttons: [NSButton] = [], examples: [NSTextField] = [], descriptions: [NSTextField] = [], groups: [NSTextField] = []
     private var moreButtons: [NSButton] = [], moreExamples: [NSTextField] = [], moreDescriptions: [NSTextField] = []
     private var keyLabels: [NSTextField] = [], keyDescriptions: [NSTextField] = []
-    private var rows: [[String]] { L10n.chinese ? Self.zh : Self.en }
+    private var rows: [[String]] { Self.examples }
     var shortcutPreferences: UserDefaults = .standard
-    private var moreRows: [[String]] { Self.more.map { [$0.0, L10n.chinese ? $0.1 : $0.2] } }
+    private var moreRows: [[String]] { Self.more.map { [$0.0, $0.1] } }
     private var keyRows: [[String]] {
         let global = Shortcut.symbols(
             keyCode: UInt32(clamping: shortcutPreferences.object(forKey: "hotKeyCode") as? Int ?? Int(Shortcut.defaultKeyCode)),

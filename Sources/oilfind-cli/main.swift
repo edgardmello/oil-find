@@ -86,7 +86,7 @@ case "watch":
         }
     }
     manager.onApply = { summary in
-        print(String(format: "+%d −%d ~%d，子树 %d 个，%.3f ms (mutation=%.3f ms)", summary.inserted, summary.removed, summary.updated, summary.scannedDirs, summary.elapsedMs, summary.mutationMs))
+        print(String(format: "+%d −%d ~%d, %d subtrees, %.3f ms (mutation=%.3f ms)", summary.inserted, summary.removed, summary.updated, summary.scannedDirs, summary.elapsedMs, summary.mutationMs))
     }
     let inputQueue = DispatchQueue(label: "oilfind-cli.input", qos: .userInteractive)
     let input = DispatchSource.makeReadSource(fileDescriptor: STDIN_FILENO, queue: inputQueue)

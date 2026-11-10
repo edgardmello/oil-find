@@ -218,7 +218,7 @@ final class FooterBar: FlippedView {
     func showToast(_ kind: ToastKind, value: String, snapshot: Bool = false) {
         toastContent = (kind, value)
         toastTimer?.invalidate()
-        toast.stringValue = Presentation.toastText(kind, value: value, chinese: L10n.chinese)
+        toast.stringValue = Presentation.toastText(kind, value: value)
         let wasVisible = (toast.layer?.presentation()?.opacity ?? Float(toast.alphaValue)) > 0
         Theme.Motion.opacity(status, to: 0, using: snapshot ? nil : Theme.Motion.basic(Theme.Motion.toastIn))
         Theme.Motion.opacity(toast, to: 1, using: snapshot ? nil : Theme.Motion.basic(Theme.Motion.toastIn))
@@ -252,7 +252,7 @@ final class FooterBar: FlippedView {
         classicReveal.localize(L10n.text("hint.reveal"))
         classicCopy.localize(L10n.text(fileActions ? "hint.copy" : "hint.copyResult"))
         syntax.localize(L10n.text("hint.syntax")); settings.localize()
-        if let (kind, value) = toastContent { toast.stringValue = Presentation.toastText(kind, value: value, chinese: L10n.chinese) }
+        if let (kind, value) = toastContent { toast.stringValue = Presentation.toastText(kind, value: value) }
         needsLayout = true
     }
     deinit { toastTimer?.invalidate() }
