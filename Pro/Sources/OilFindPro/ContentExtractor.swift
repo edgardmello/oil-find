@@ -2,6 +2,8 @@ import Foundation
 import PDFKit
 import AppKit
 import Compression
+import Vision
+import ImageIO
 
 public struct ContentTerm: Equatable {
     public let text: String
@@ -54,6 +56,9 @@ public enum ContentExtractor {
             ext = ""
         }
 
+        if kind == 4 || ["png", "jpg", "jpeg", "heic", "heif", "tif", "tiff", "bmp", "webp"].contains(ext) {
+            return size <= maxDocumentFileSize ? .image : nil
+        }
         if ext == "pdf" {
             return size <= maxDocumentFileSize ? .pdf : nil
         }
@@ -74,11 +79,12 @@ public enum ContentExtractor {
         case pdf
         case officeXML
         case richText
+        case image
 
         public var isDocument: Bool {
             switch self {
             case .plainText: return false
-            case .pdf, .officeXML, .richText: return true
+            case .pdf, .officeXML, .richText, .image: return true
             }
         }
     }
@@ -95,6 +101,8 @@ public enum ContentExtractor {
             raw = extractOfficeXMLText(url: url)
         case .richText:
             raw = extractRichText(url: url)
+        case .image:
+            raw = extractImageText(url: url)
         }
         guard let text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             return nil
@@ -103,6 +111,24 @@ public enum ContentExtractor {
             return String(text.prefix(maxStoredTextLength))
         }
         return text
+    }
+
+    private static func extractImageText(url: URL) -> String? {
+        // Decode a bounded thumbnail rather than allocating the full resolution image.
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 2048
+              ] as CFDictionary) else { return nil }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.automaticallyDetectsLanguage = true
+        request.usesLanguageCorrection = true
+        do {
+            try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+            return request.results?.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+        } catch { return nil }
     }
 
     private static func extractPlainText(url: URL) -> String? {

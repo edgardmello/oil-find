@@ -2,8 +2,8 @@ import Foundation
 import OilFindCore
 
 // English-only UI copy shared by every surface, including snapshots.
-enum L10n {
-    static func text(_ key: String, _ arguments: String...) -> String {
+public enum L10n {
+    public static func text(_ key: String, _ arguments: String...) -> String {
         guard let value = strings[key] else { preconditionFailure("Unknown localization key: \\(key)") }
         return String(format: value, arguments: arguments)
     }
@@ -25,6 +25,10 @@ enum L10n {
         }
     }
     private static let strings: [String: String] = [
+        "content.help": "Search names normally. Use [word], [\"a phrase\"] or content:\"a phrase\" to search file contents, including text in images.",
+        "content.documents": "PDF, Office, rich text and images (OCR)",
+        "content.snippetPrefix": "Contains: ",
+        "search.clear": "Clear Search",
         "topicsPlaceholder": "Search AI topics and conversations",
         "topicsTitle": "AI Topics",
         "topicsUntitled": "Untitled topic",
@@ -132,7 +136,7 @@ enum L10n {
         "hint.copyResult": "Copy",
         "search.failed": "Search could not finish. Please try again.",
         "search.actionFailed": "This result is no longer available. Search again and try once more.",
-        "placeholder": "Search files, folders and apps",
+        "placeholder": "Search names, or [text] for contents",
         "filter.all": "All", "filter.folder": "Folders",
         "filter.app": "Apps", "filter.document": "Documents",
         "filter.image": "Images", "filter.video": "Videos",

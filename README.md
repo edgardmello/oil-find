@@ -41,6 +41,8 @@ The default scope leaves out dependency folders, app and package internals, Libr
 
 ## Search syntax
 
+In this personal build, ordinary text searches **file names**. To search **inside files**, use `[client]`, `["payment received"]` or `content:"payment received"`. For example, `invoice [client]` requires both a matching filename and matching contents; a filename alone cannot satisfy `[client]`. Text in images is recognized locally with macOS Vision. Enable File Content Search in Settings; the documents switch also controls image OCR. See [content search](./docs/CONTENT_SEARCH.md) for examples and extraction limits.
+
 | Type | Meaning |
 | --- | --- |
 | `wd`, `wendang` | Pinyin initials or full pinyin, finds 文档 |
