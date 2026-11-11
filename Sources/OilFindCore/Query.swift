@@ -208,15 +208,15 @@ public struct Query {
                     if contents.hasSuffix("]") { contents.removeLast() }
                     let exclude = neg || contents.hasPrefix("!")
                     if contents.hasPrefix("!") { contents.removeFirst() }
-                    var terms: [String] = [], term = "", inQuotes = false
+                    var terms: [(String, Bool)] = [], term = "", inQuotes = false, termQuoted = false
                     for character in contents {
-                        if character == "\"" { inQuotes.toggle() }
+                        if character == "\"" { inQuotes.toggle(); termQuoted = true }
                         else if character == "|" && !inQuotes {
-                            terms.append(term.trimmingCharacters(in: .whitespacesAndNewlines)); term = ""
+                            terms.append((term.trimmingCharacters(in: .whitespacesAndNewlines), termQuoted)); term = ""; termQuoted = false
                         } else { term.append(character) }
                     }
-                    terms.append(term.trimmingCharacters(in: .whitespacesAndNewlines))
-                    alts.append(contentsOf: terms.map { Atom(negated: exclude, matcher: .content($0)) })
+                    terms.append((term.trimmingCharacters(in: .whitespacesAndNewlines), termQuoted))
+                    alts.append(contentsOf: terms.map { Atom(negated: exclude, matcher: .content($0.0), contentWholeWords: $0.1) })
                     if i + 1 == tokens.count || tokens[i + 1].body != "|" { flushClause() }
                     continue
                 }
@@ -237,7 +237,7 @@ public struct Query {
                        !quoted {
                         resolved = .fuzzyName(needle)
                     }
-                    alts.append(Atom(negated: neg, matcher: resolved, excludesAncestors: neg && ordinary))
+                    alts.append(Atom(negated: neg, matcher: resolved, excludesAncestors: neg && ordinary, contentWholeWords: quoted && body.lowercased().hasPrefix("content:")))
                 }
             }
             if i + 1 == tokens.count || tokens[i + 1].body != "|" { flushClause() }
@@ -255,6 +255,8 @@ public struct Clause { public var alternatives: [Atom] }
 public struct Atom {
     public var negated: Bool; public var matcher: Matcher
     public var excludesAncestors: Bool = false
+    /// Quoted content terms require word boundaries; filename quoting is independent.
+    public var contentWholeWords: Bool = false
 }
 public struct QueryDiagnostic: Equatable {
     public enum Kind: String { case regex, kind, size, date, depth }

@@ -8,10 +8,12 @@ import ImageIO
 public struct ContentTerm: Equatable {
     public let text: String
     public let caseSensitive: Bool
+    public let wholeWords: Bool
 
-    public init(text: String, caseSensitive: Bool) {
+    public init(text: String, caseSensitive: Bool, wholeWords: Bool = false) {
         self.text = text
         self.caseSensitive = caseSensitive
+        self.wholeWords = wholeWords
     }
 }
 
@@ -276,22 +278,33 @@ public enum ContentExtractor {
             .replacingOccurrences(of: "&apos;", with: "'")
     }
 
+    private static func isWordCharacter(_ character: Character) -> Bool {
+        character.unicodeScalars.contains {
+            CharacterSet.alphanumerics.contains($0) || CharacterSet.nonBaseCharacters.contains($0) || $0 == "_"
+        }
+    }
+
+    // Keep matching and snippet highlights consistent, including Unicode word boundaries.
+    private static func match(_ term: ContentTerm, in body: String, from start: String.Index? = nil) -> Range<String.Index>? {
+        guard !term.text.isEmpty else { return nil }
+        let options: String.CompareOptions = term.caseSensitive ? [] : [.caseInsensitive, .diacriticInsensitive]
+        var cursor = start ?? body.startIndex
+        while cursor < body.endIndex,
+              let found = body.range(of: term.text, options: options, range: cursor..<body.endIndex) {
+            let startsInsideWord = found.lowerBound > body.startIndex && isWordCharacter(body[found.lowerBound])
+                && isWordCharacter(body[body.index(before: found.lowerBound)])
+            let endsInsideWord = found.upperBound < body.endIndex && isWordCharacter(body[body.index(before: found.upperBound)])
+                && isWordCharacter(body[found.upperBound])
+            if !term.wholeWords || !startsInsideWord && !endsInsideWord { return found }
+            cursor = body.index(after: found.lowerBound)
+        }
+        return nil
+    }
+
     public static func matches(body: String, clauses: [[ContentTerm]], excluded: [ContentTerm]) -> Bool {
         guard !clauses.isEmpty else { return false }
-        for neg in excluded {
-            let options: String.CompareOptions = neg.caseSensitive ? [] : [.caseInsensitive, .diacriticInsensitive]
-            if body.range(of: neg.text, options: options) != nil {
-                return false
-            }
-        }
-        for clause in clauses {
-            let satisfied = clause.contains { term in
-                let options: String.CompareOptions = term.caseSensitive ? [] : [.caseInsensitive, .diacriticInsensitive]
-                return body.range(of: term.text, options: options) != nil
-            }
-            if !satisfied { return false }
-        }
-        return true
+        if excluded.contains(where: { match($0, in: body) != nil }) { return false }
+        return clauses.allSatisfy { clause in clause.contains { match($0, in: body) != nil } }
     }
 
     public static func makePresentation(body: String, terms: [ContentTerm], prefix: String) -> (text: String, highlights: [NSRange]) {
@@ -301,8 +314,7 @@ public enum ContentExtractor {
         }
         var firstMatch: Range<String.Index>?
         for term in nonEmptyTerms {
-            let options: String.CompareOptions = term.caseSensitive ? [] : [.caseInsensitive, .diacriticInsensitive]
-            if let range = body.range(of: term.text, options: options) {
+            if let range = match(term, in: body) {
                 if firstMatch == nil || range.lowerBound < firstMatch!.lowerBound {
                     firstMatch = range
                 }
@@ -336,10 +348,9 @@ public enum ContentExtractor {
         var highlights: [NSRange] = []
         let searchStart = fullText.index(fullText.startIndex, offsetBy: prefix.count)
         for term in nonEmptyTerms {
-            let options: String.CompareOptions = term.caseSensitive ? [] : [.caseInsensitive, .diacriticInsensitive]
             var cursor = searchStart
             while cursor < fullText.endIndex,
-                  let found = fullText.range(of: term.text, options: options, range: cursor..<fullText.endIndex) {
+                  let found = match(term, in: fullText, from: cursor) {
                 let nsRange = NSRange(found, in: fullText)
                 if nsRange.length > 0 {
                     highlights.append(nsRange)
