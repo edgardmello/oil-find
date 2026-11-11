@@ -1,35 +1,43 @@
 #!/bin/bash
 set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DESTINATION="/Applications/Oil Find.app"
+export OILFIND_REQUIRE_STABLE_SIGNING=1
 "$PROJECT_DIR/scripts/build-app.sh"
 
-for application in 'Sift:com.oiloil.sift' 'OilFind:com.oiloil.find'; do
-    process_name="${application%%:*}"
-    bundle_id="${application#*:}"
-    if pgrep -x "$process_name" >/dev/null; then
-        osascript -e "quit app id \"$bundle_id\"" &
-        QUIT_REQUEST_PID=$!
-        for ((attempt = 0; attempt < 50; attempt++)); do
-            if ! pgrep -x "$process_name" >/dev/null; then break; fi
-            sleep 0.1
-        done
-        if kill -0 "$QUIT_REQUEST_PID" 2>/dev/null; then kill "$QUIT_REQUEST_PID" 2>/dev/null || true; fi
-        wait "$QUIT_REQUEST_PID" 2>/dev/null || true
-        if pgrep -x "$process_name" >/dev/null; then
-            printf '%s did not quit within 5 seconds.\n' "$process_name" >&2
-            exit 1
+# Stage on the destination volume. Never overlay an existing bundle.
+WORK="$(mktemp -d /Applications/.oilfind-install.XXXXXX)"
+REPLACED=0
+cleanup() {
+    local status=$?
+    if [[ "$REPLACED" == 1 && "$status" != 0 ]]; then
+        swift "$PROJECT_DIR/scripts/quit-app.swift" || { printf 'Could not stop the new app; backup retained at %s\n' "$WORK" >&2; exit "$status"; }
+        rm -rf "$DESTINATION"
+        if [[ -d "$WORK/previous.app" ]]; then
+            mv "$WORK/previous.app" "$DESTINATION" || { printf 'Backup retained at %s\n' "$WORK" >&2; exit "$status"; }
+            open "$DESTINATION" || true
         fi
     fi
-done
-
-rm -rf "/Applications/Sift.app" "$HOME/Library/Application Support/Sift" "$HOME/Library/Caches/Sift"
-if defaults read com.oiloil.sift >/dev/null 2>&1; then
-    defaults delete com.oiloil.sift
+    rm -rf "$WORK"
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+ditto "$PROJECT_DIR/build/Oil Find.app" "$WORK/new.app"
+codesign --verify --strict "$WORK/new.app"
+if [[ -d "$DESTINATION" ]]; then
+    REQUIREMENT="$(codesign -d -r- "$DESTINATION" 2>&1 | sed -n 's/^designated => //p')"
+    if [[ -z "$REQUIREMENT" ]] || ! codesign --verify --strict --test-requirement "=$REQUIREMENT" "$WORK/new.app"; then
+        printf '%s\n' 'The new signature does not match the installed identity. Installation cancelled to preserve permissions.' >&2
+        exit 1
+    fi
 fi
-ditto "$PROJECT_DIR/build/Oil Find.app" "/Applications/Oil Find.app"
-for ((attempt = 1; attempt <= 5; attempt++)); do
-    if open "/Applications/Oil Find.app"; then exit 0; fi
-    if ((attempt < 5)); then sleep 1; fi
-done
-printf '%s\n' 'Oil Find could not be opened after 5 attempts.' >&2
-exit 1
+swift "$PROJECT_DIR/scripts/quit-app.swift"
+if [[ -d "$DESTINATION" ]]; then mv "$DESTINATION" "$WORK/previous.app"; fi
+REPLACED=1
+mv "$WORK/new.app" "$DESTINATION"
+codesign --verify --strict "$DESTINATION"
+open "$DESTINATION"
+swift "$PROJECT_DIR/scripts/quit-app.swift" --verify-launch
+printf 'Installed and opened: %s\n' "$DESTINATION"

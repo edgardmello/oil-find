@@ -246,6 +246,11 @@ public enum Searcher {
         let started = CFAbsoluteTimeGetCurrent()
         return store.read {
             if isCancelled() { return nil }
+            if query.hasContentTerms {
+                return SearchResult(store: store, query: query, options: options, items: [], total: 0,
+                                    sortedCount: 0, elapsedMs: (CFAbsoluteTimeGetCurrent() - started) * 1000,
+                                    scores: [], isNarrowed: false)
+            }
             if query.isEmpty { return recent(query, options: options, store: store, started: started, isCancelled: isCancelled) }
             let narrowed = previous.map { canNarrow(query, options: options, store: store, previous: $0) } ?? false
             let candidateCount = narrowed ? previous!.items.count : store.count - 1

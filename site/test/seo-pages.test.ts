@@ -28,7 +28,7 @@ it.each(['zh', 'en'] as const)('uses semantic syntax and keyboard tables and the
   for (const [query, meaning] of dict[lang].syntax) {
     expect(syntaxRows(lang).some(row => row.queries.includes(query) && row.meaning === meaning)).toBe(true);
   }
-  const readme = readFileSync(new URL(lang === 'zh' ? '../../README.zh-CN.md' : '../../README.md', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL(lang === 'zh' ? '../../docs/archive/README.zh-CN.md' : '../../README.md', import.meta.url), 'utf8');
   const section = readme.split(lang === 'zh' ? '## 键盘操作' : '## Keyboard')[1].split('\n## ')[0];
   const rows = section.split('\n').filter(line => line.startsWith('| <kbd>')).map(line => line.split('|').slice(1, 3).map(value => value.replace(/<\/?kbd>/g, '').trim()));
   expect(keyboardRows[lang]).toEqual(rows);

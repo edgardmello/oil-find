@@ -22,8 +22,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var statusMenu: NSMenu?
     private var settingsItem: NSMenuItem?, extensionItem: NSMenuItem?
-    private var localizedMenuItems: [(String, NSMenuItem)] = []
-    private var languageObserver: NSObjectProtocol?
     private var hotKey: HotKey?
     private var manager: IndexManager?
     private var settingsController: SettingsWindowController?
@@ -66,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         appExtension?.onSearchSourcesChange = sourcesChanged
         appExtension?.attachExternalDrives(externalDrives)
         externalDrives.start()
-        appExtension?.start(chinese: L10n.chinese, showSettings: { [weak self] in self?.presentSettings() })
+        appExtension?.start(showSettings: { [weak self] in self?.presentSettings() })
         panel.searchController.onSettings = { [weak self] in self?.showSettings() }
         let fullDiskAccess = Permissions.hasFullDiskAccess()
         var state = WelcomeState(didFinishOnboarding: defaults.bool(forKey: "didFinishOnboarding"), skippedFullDiskAccess: defaults.bool(forKey: "skippedFullDiskAccess"), granted: fullDiskAccess)
@@ -150,12 +148,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func makeMenu(keyCode: UInt32 = UInt32(kVK_ANSI_F), modifiers: UInt32 = UInt32(cmdKey | shiftKey), hotKeyAvailable: Bool = true) -> NSMenu {
         let menu = NSMenu(); menu.autoenablesItems = false; menu.delegate = self
         statusMenu = menu
-        localizedMenuItems.removeAll()
         extensionItem = nil
         func item(_ key: String, _ action: Selector?, _ equivalent: String = "") -> NSMenuItem {
             let value = NSMenuItem(title: L10n.text(key), action: action, keyEquivalent: equivalent)
             value.target = self; value.isEnabled = action != nil; menu.addItem(value)
-            localizedMenuItems.append((key, value)); return value
+            return value
         }
         hotKeyFailureItem = item("menu.hotkeyFailed", nil)
         hotKeyFailureItem?.isHidden = hotKeyAvailable
@@ -174,17 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         _ = item("menu.quit", #selector(quit), "q")
         appExtension?.onSettingsMenuItemChange = { [weak self] in self?.refreshExtensionMenu() }
-        if languageObserver == nil {
-            languageObserver = NotificationCenter.default.addObserver(forName: L10n.changed, object: nil, queue: .main) { [weak self] _ in
-                self?.appExtension?.languageDidChange(chinese: L10n.chinese)
-                self?.localizeMenu()
-            }
-        }
         return menu
-    }
-    private func localizeMenu() {
-        for (key, item) in localizedMenuItems { item.title = L10n.text(key) }
-        if let menu = statusMenu { menuWillOpen(menu) }
     }
     private func registerHotKey(keyCode: UInt32, modifiers: UInt32) -> Bool {
         hotKey?.unregister()
@@ -290,5 +277,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return true
     }
     func applicationWillTerminate(_ notification: Notification) { if !secondaryInstance { topics.stop(); appExtension?.stop(); externalDrives.stop() }; settingsController?.model.stopRefreshing(); permissionTimer?.invalidate(); hotKey?.unregister(); manager?.stop() }
-    deinit { if let languageObserver { NotificationCenter.default.removeObserver(languageObserver) } }
 }

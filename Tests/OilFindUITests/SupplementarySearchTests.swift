@@ -21,11 +21,11 @@ final class SupplementarySearchTests: XCTestCase {
             cell.configure(item(.init(sourceID: "startup", entryID: 1, detail: reason, highlights: [NSRange(location: 0, length: 2)])), query: .parse("发票"), icons: icons)
             cell.layoutSubtreeIfNeeded()
             let labels = cell.subviews.compactMap { $0 as? NSTextField }
-            let detail = try XCTUnwrap(labels.first { $0.stringValue == reason + " · " })
+            let detail = try XCTUnwrap(labels.first { $0.stringValue == reason })
             let path = try XCTUnwrap(labels.first { $0.stringValue == Presentation.abbreviate(path: parent, home: NSHomeDirectory()) })
             XCTAssertFalse(detail.isHidden)
-            XCTAssertGreaterThanOrEqual(detail.frame.width, detail.attributedStringValue.size().width)
-            XCTAssertEqual(path.frame.minX, detail.frame.maxX)
+            XCTAssertEqual(detail.frame.width, min(detail.attributedStringValue.size().width, max(100, (760.0 - 236.0) * 0.62)), accuracy: 1)
+            XCTAssertEqual(path.frame.minX, detail.frame.maxX + 6)
             XCTAssertEqual(path.lineBreakMode, .byTruncatingMiddle)
             XCTAssertLessThan(path.frame.width, path.attributedStringValue.size().width)
             XCTAssertNotNil(detail.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil))
@@ -138,6 +138,56 @@ final class SupplementarySearchTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         XCTAssertEqual(controller.results.result?.count, 1)
     }
+    func testExplicitContentSearchFinishesDuringUnrelatedIndexUpdates() throws {
+        _ = NSApplication.shared
+        final class GatedProvider: SupplementarySearchProvider {
+            let isEnabled = true
+            let gate = DispatchSemaphore(value: 0)
+            var preparations = 0
+            func prepareSearch(_ query: Query, options: SearchOptions, sources: [SearchSource], isCancelled: @escaping () -> Bool) -> () -> [SupplementaryHit] {
+                preparations += 1
+                return {
+                    self.gate.wait()
+                    guard !isCancelled(), let source = sources.first else { return [] }
+                    return [.init(sourceID: source.id, entryID: 3, detail: "Found in file contents",
+                                  sourceVersion: source.store.read { source.store.version })]
+                }
+            }
+            func sourcesDidChange(_ sources: [SearchSource]) { }
+            func userActivity(visible: Bool, typing: Bool) { }
+        }
+        let original = store(), provider = GatedProvider()
+        let db = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: db) }
+        try original.save(to: db.path)
+        let index = IndexManager(config: IndexConfig(rootPath: "/generated"), dbURL: db)
+        index.startOffline()
+        defer { index.stop(); provider.gate.signal() }
+        let deadline = Date().addingTimeInterval(3)
+        while index.store == nil && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        let loaded = try XCTUnwrap(index.store)
+        let controller = SearchViewController(snapshot: true)
+        _ = controller.view
+        controller.manager = index
+        controller.supplementaryProvider = provider
+        controller.searchField.text = "*.png [contents]"
+        controller.startSearch()
+        for _ in 0..<5 {
+            loaded.write { loaded.version += 1 }
+            controller.sourcesChanged()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        let starts = provider.preparations
+        // Release all possible old-implementation requests so a failing regression never hangs.
+        for _ in 0..<starts { provider.gate.signal() }
+        while controller.results.result?.count != 1 && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertEqual(starts, 1, "Unrelated events must not cancel and resubmit the same query")
+        XCTAssertEqual(controller.results.result?.count, 1)
+        XCTAssertEqual(controller.results.selectedID, 3)
+    }
+
     func testStaleAndUnknownMatchesAreIgnored() throws {
         let store = store(), base = SearchPresentation(try XCTUnwrap(Searcher.search(Query.parse("发票"), in: store)))
         let result = base.supplement([.init(sourceID: "absent", entryID: 1, detail: "x"), .init(sourceID: "startup", entryID: 99, detail: "x")], options: .init())

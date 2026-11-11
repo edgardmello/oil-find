@@ -9,8 +9,12 @@ case "${1:-}" in
     --debug) [[ $# -eq 1 ]] || exit 2; CONFIGURATION=debug; APP_PATH="$PROJECT_DIR/build/debug/Oil Find.app" ;;
     *) printf '%s\n' 'Usage: scripts/build-app.sh [--debug]' >&2; exit 2 ;;
 esac
+source "$PROJECT_DIR/scripts/signing.sh"
+resolve_signing_identity
 swift build -c "$CONFIGURATION"
 BINARY_DIR="$(swift build -c "$CONFIGURATION" --show-bin-path)"
+# Always assemble a fresh generated bundle, even for incremental builds.
+rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
 cp "$BINARY_DIR/OilFind" "$APP_PATH/Contents/MacOS/OilFind"
 if [[ "$CONFIGURATION" == release ]]; then
@@ -33,20 +37,15 @@ for target in package["targets"]:
         name = package["name"] + "_" + target["c99name"] + ".bundle"
         shutil.copytree(binary / name, resources / name)
 ' "$BINARY_DIR" "$APP_PATH/Contents/Resources"
-SELF_SIGNED="Oil Find Self-Signed"
-LOCAL_IDENTITY="${OILFIND_LOCAL_SIGN_IDENTITY:-}"
-if [[ -z "$LOCAL_IDENTITY" && -z "${OILFIND_SIGN_IDENTITY:-}" && -f .env.oilfind-sign-identity ]]; then
-    LOCAL_IDENTITY="$(cat .env.oilfind-sign-identity)"
-fi
-if [[ -n "$LOCAL_IDENTITY" ]]; then
-    BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP_PATH/Contents/Info.plist")"
-    codesign --force --sign "$LOCAL_IDENTITY" --identifier "$BUNDLE_ID" --timestamp=none "$APP_PATH"
-elif [[ -n "${OILFIND_SIGN_IDENTITY:-}" ]]; then
-    codesign --force --sign "$OILFIND_SIGN_IDENTITY" --identifier com.oiloil.find --options runtime --timestamp "$APP_PATH"
-elif security find-identity -v -p codesigning | grep -q "\"$SELF_SIGNED\""; then
-    # Stable identity: macOS keeps Full Disk Access across updates. See scripts/create-signing-cert.sh.
-    codesign --force --sign "$SELF_SIGNED" --identifier com.oiloil.find "$APP_PATH"
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP_PATH/Contents/Info.plist")"
+if [[ -n "$SIGN_IDENTITY" ]]; then
+    if [[ -n "${OILFIND_SIGN_IDENTITY:-}" && -z "${OILFIND_LOCAL_SIGN_IDENTITY:-}" ]]; then
+        codesign --force --sign "$SIGN_IDENTITY" --identifier "$BUNDLE_ID" --options runtime --timestamp "$APP_PATH"
+    else
+        codesign --force --sign "$SIGN_IDENTITY" --identifier "$BUNDLE_ID" --timestamp=none "$APP_PATH"
+    fi
 else
-    codesign --force --sign - --identifier com.oiloil.find "$APP_PATH"
+    codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_PATH"
 fi
+codesign --verify --strict "$APP_PATH"
 printf '%s\n' "$APP_PATH"

@@ -3,12 +3,12 @@ import Foundation
 public enum ToastKind { case copiedPath, copiedName, trashed }
 
 public enum Presentation {
-    public static func toastText(_ kind: ToastKind, value: String, chinese: Bool) -> String {
+    public static func toastText(_ kind: ToastKind, value: String) -> String {
         let prefix: String
         switch kind {
-        case .copiedPath: prefix = chinese ? "已拷贝：" : "Copied: "
-        case .copiedName: prefix = chinese ? "已拷贝名称：" : "Copied name: "
-        case .trashed: prefix = chinese ? "已移到废纸篓：" : "Moved to Trash: "
+        case .copiedPath: prefix = "Copied: "
+        case .copiedName: prefix = "Copied name: "
+        case .trashed: prefix = "Moved to Trash: "
         }
         return prefix + value
     }
@@ -81,21 +81,20 @@ public enum Presentation {
         return path
     }
 
-    public static func dateText(_ date: Date, now: Date, calendar: Calendar, chinese: Bool) -> String {
+    public static func dateText(_ date: Date, now: Date, calendar: Calendar) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: chinese ? "zh_CN" : "en_US_POSIX")
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
         if calendar.isDate(date, inSameDayAs: now) {
             formatter.dateFormat = "HH:mm"
-            return (chinese ? "今天 " : "Today ") + formatter.string(from: date)
+            return "Today " + formatter.string(from: date)
         }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
             formatter.dateFormat = "HH:mm"
-            return (chinese ? "昨天 " : "Yesterday ") + formatter.string(from: date)
+            return "Yesterday " + formatter.string(from: date)
         }
-        formatter.dateFormat = calendar.component(.year, from: date) == calendar.component(.year, from: now)
-            ? (chinese ? "M月d日" : "MMM d") : "yyyy/M/d"
+        formatter.dateFormat = calendar.component(.year, from: date) == calendar.component(.year, from: now) ? "MMM d" : "yyyy/M/d"
         return formatter.string(from: date)
     }
 

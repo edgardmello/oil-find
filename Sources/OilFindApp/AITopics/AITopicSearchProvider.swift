@@ -4,13 +4,12 @@ import OilFindCore
 final class AITopicSearchProvider: AdditionalSearchProvider {
     private let manager: AITopicManager
     private let icons = AITopicIcons()
-    private var chinese: Bool { L10n.chinese }
     var onChange: (() -> Void)?
     var isEnabled: Bool { manager.isEnabled }
-    var placeholder: String { L10n.text("topicsPlaceholder", chinese: chinese) }
-    var title: String { L10n.text("topicsTitle", chinese: chinese) }
+    var placeholder: String { L10n.text("topicsPlaceholder") }
+    var title: String { L10n.text("topicsTitle") }
     var status: String? {
-        manager.failed ? L10n.text("topicsSyncFailed", chinese: chinese) : manager.indexing ? L10n.text("topicsBuildingShort", chinese: chinese) : nil
+        manager.failed ? L10n.text("topicsSyncFailed") : manager.indexing ? L10n.text("topicsBuildingShort") : nil
     }
     init(manager: AITopicManager) {
         self.manager = manager
@@ -25,8 +24,8 @@ final class AITopicSearchProvider: AdditionalSearchProvider {
         return items.filter { item in item.availabilityScope.map(scopes.contains) ?? false }
     }
     func prepareSearch(_ query: Query, isCancelled: @escaping () -> Bool) -> () throws -> [AdditionalSearchItem] {
+        guard !query.hasContentTerms else { return { [] } }
         let images = Dictionary(uniqueKeysWithValues: AITopicProvider.allCases.map { ($0, icons.image($0)) })
-        let chinese = chinese
         let terms = AITopicIndex.fold(query.raw).split(whereSeparator: { $0.isWhitespace }).map(String.init)
         return { [manager] in
             let found = try manager.readSearch(query.raw, isCancelled: isCancelled)
@@ -36,7 +35,7 @@ final class AITopicSearchProvider: AdditionalSearchProvider {
                 let actions = { () -> [AdditionalSearchAction] in
                     let definitions: [(AdditionalSearchAction.Kind, String)] = [(.open, "topicsOpen"), (.copy, "topicsCopyResume"), (.copyName, "topicsCopyTitle")]
                     return definitions.map { (kind: AdditionalSearchAction.Kind, label: String) in
-                        AdditionalSearchAction(kind: kind, title: L10n.text(label, chinese: chinese)) { completion in
+                        AdditionalSearchAction(kind: kind, title: L10n.text(label)) { completion in
                             manager.resolve(topicKey) { current in
                                 guard let current else { completion(false); return }
                                 switch kind {
@@ -52,7 +51,7 @@ final class AITopicSearchProvider: AdditionalSearchProvider {
                     }
                 }
                 let project = topic.project.isEmpty ? "" : " · " + URL(fileURLWithPath: topic.project).lastPathComponent
-                return AdditionalSearchItem(id: topicKey, title: topic.title.isEmpty ? L10n.text("topicsUntitled", chinese: chinese) : topic.title,
+                return AdditionalSearchItem(id: topicKey, title: topic.title.isEmpty ? L10n.text("topicsUntitled") : topic.title,
                     detail: topic.excerpt, location: topic.provider.name + project, modified: Date(timeIntervalSince1970: topic.modified),
                     icon: images[topic.provider]!, relevance: Self.relevance(topic, terms: terms), availabilityScope: topic.provider.rawValue, actions: actions)
             }

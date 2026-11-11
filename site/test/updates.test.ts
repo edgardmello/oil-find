@@ -36,7 +36,7 @@ describe('updates and release notes', () => {
       version: published.version,
       published: published.date,
       url: `https://find.oiloil.org/downloads/Oil-Find-${published.version}.zip`,
-      notes: published.notes,
+      notes: published.notes.en,
     });
     expect(manifest.size).toBeGreaterThan(0);
     expect(manifest.sha256).toMatch(/^[a-f0-9]{64}$/);
@@ -52,7 +52,8 @@ describe('updates and release notes', () => {
       execFileSync(process.execPath, ['--experimental-strip-types', script, plist, archive, output], { stdio: 'pipe' });
       const manifest = JSON.parse(readFileSync(output, 'utf8'));
       expect(manifest).toEqual({ version: releases[0].version, build: 5, url: `https://find.oiloil.org/downloads/Oil-Find-${releases[0].version}.zip`, size: 18,
-        sha256: createHash('sha256').update('test archive bytes').digest('hex'), minimumSystemVersion: '14.0', published: releases[0].date, notes: releases[0].notes });
+        sha256: createHash('sha256').update('test archive bytes').digest('hex'), minimumSystemVersion: '14.0', published: releases[0].date, notes: releases[0].notes.en });
+      expect(Array.isArray(manifest.notes) && manifest.notes.every((note: unknown) => typeof note === 'string')).toBe(true);
       rmSync(output); writeFileSync(plist, info('99.0.0'));
       expect(() => execFileSync(process.execPath, ['--experimental-strip-types', script, plist, archive, output], { stdio: 'pipe' })).toThrow(/Release notes for 99.0.0 are missing/);
       expect(existsSync(output)).toBe(false);

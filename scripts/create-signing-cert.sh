@@ -12,24 +12,24 @@ OPENSSL=/usr/bin/openssl
 
 already_done() {
     if security find-certificate -c "${NAME}" "${KEYCHAIN}" >/dev/null 2>&1; then
-        echo "钥匙串里已经有「${NAME}」，不需要重复创建。"
+        echo "O certificado \"${NAME}\" já existe no keychain — nada a fazer."
         exit 0
     fi
     if [[ -e "${P12}" ]]; then
-        echo "备份文件已经存在，为避免覆盖已停止：${P12}"
-        echo "如果钥匙串里的证书丢了，用它恢复：security import \"${P12}\" -k \"${KEYCHAIN}\" -T /usr/bin/codesign"
+        echo "O arquivo de backup já existe; cancelando para não sobrescrever: ${P12}"
+        echo "Se o certificado do keychain se perder, restaure com: security import \"${P12}\" -k \"${KEYCHAIN}\" -T /usr/bin/codesign"
         exit 1
     fi
 }
 already_done
 
-echo "将创建签名证书「${NAME}」，并导出一份加密备份到："
+echo "Vou criar o certificado de assinatura \"${NAME}\" e exportar um backup criptografado em:"
 echo "  ${P12}"
 echo
-read -r -s -p "给备份文件设一个密码（至少 8 位）：" PASSWORD; echo
-read -r -s -p "再输入一次：" CONFIRM; echo
-[[ "${PASSWORD}" == "${CONFIRM}" ]] || { echo "两次输入不一致，已取消。"; exit 1; }
-[[ ${#PASSWORD} -ge 8 ]] || { echo "密码至少 8 位，已取消。"; exit 1; }
+read -r -s -p "Defina uma senha para o arquivo de backup (mínimo 8 caracteres): " PASSWORD; echo
+read -r -s -p "Digite a mesma senha novamente: " CONFIRM; echo
+[[ "${PASSWORD}" == "${CONFIRM}" ]] || { echo "As senhas não conferem — cancelado."; exit 1; }
+[[ ${#PASSWORD} -ge 8 ]] || { echo "A senha precisa ter pelo menos 8 caracteres — cancelado."; exit 1; }
 # Check again: another run may have finished while this one waited for the password.
 already_done
 
@@ -57,20 +57,20 @@ P12PASS="${PASSWORD}" "${OPENSSL}" pkcs12 -export -inkey "${WORK}/key.pem" -in "
     -name "${NAME}" -out "${P12}" -passout env:P12PASS
 chmod 600 "${P12}"
 
-echo "导入到登录钥匙串……"
+echo "Importando para o keychain de login..."
 security import "${P12}" -k "${KEYCHAIN}" -P "${PASSWORD}" -T /usr/bin/codesign >/dev/null
-echo "设为可用于代码签名（系统会弹窗要你输入登录密码确认）……"
+echo "Marcando como confiável para assinatura de código (o macOS vai pedir sua senha de login)..."
 security add-trusted-cert -r trustRoot -p codeSign -k "${KEYCHAIN}" "${WORK}/cert.pem"
 
 if security find-identity -v -p codesigning "${KEYCHAIN}" | grep -q "${NAME}"; then
     echo
-    echo "完成。以后 scripts/build-app.sh 会自动用「${NAME}」签名。"
-    echo "第一次签名时如果弹出“codesign 想要访问钥匙串中的密钥”，点“始终允许”。"
+    echo "Pronto! A partir de agora o scripts/build-app.sh assina automaticamente com \"${NAME}\"."
+    echo "Se na primeira assinatura aparecer o aviso \"codesign quer acessar a chave no keychain\", escolha \"Sempre Permitir\"."
     echo
-    echo "请把备份文件和刚才的密码一起存进密码管理器："
+    echo "Guarde o arquivo de backup e a senha no seu gerenciador de senhas:"
     echo "  ${P12}"
-    echo "证书丢失后，下一个版本会让所有用户重新授予一次完全磁盘访问权限。"
+    echo "Se o certificado se perder, a próxima versão fará todos os usuários concederem Full Disk Access novamente."
 else
-    echo "证书已导入，但没有出现在可用签名身份里。把上面的输出发给 Claude 看看。"
+    echo "O certificado foi importado, mas não apareceu como identidade de assinatura disponível."
     exit 1
 fi
