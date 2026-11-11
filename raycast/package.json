@@ -55,7 +55,7 @@
   ],
   "scripts": {
     "dev": "ray develop",
-    "build": "ray build -e dist",
+    "build": "ray build -e dist -o dist",
     "lint": "ray lint",
     "typecheck": "tsc --noEmit"
   },

@@ -7,6 +7,8 @@
 #   ./build.sh install            # PRODUCTION: build release, quit the running
 #                                 # app, overwrite /Applications/Oil Find.app,
 #                                 # and relaunch it
+#   ./build.sh clean              # remove generated output (keep Swift cache)
+#   ./build.sh raycast            # install the compatible Raycast extension
 #   ./build.sh dev                # debug build + open the debug app
 #   ./build.sh build              # release build only (bundle in build/)
 #   ./build.sh test               # swift test
@@ -27,7 +29,6 @@ PLIST="Resources/Info.plist"
 DEBUG_APP="build/debug/Oil Find.app"
 RELEASE_APP="build/Oil Find.app"
 INSTALL_APP="/Applications/Oil Find.app"
-SELF_SIGNED="Oil Find Self-Signed"
 
 # ----------------------------------------------------------------- colors ---
 if [ -t 1 ]; then
@@ -125,42 +126,15 @@ set_version() {
 }
 
 # --------------------------------------------------------------- pre-checks -
-# Ejects orphaned DMG mount volumes left behind by failed builds. A stuck
-# 'dmg.XXXXXX' volume makes the next build die with 'Resource busy'.
-eject_orphan_dmg_mounts() {
-  local ORPHANS=0 vol dev
-  for vol in /Volumes/dmg.*; do
-    [ -d "$vol" ] || continue
-    dev=$(diskutil info "$vol" 2>/dev/null | perl -ne 'print "$1\n" if /^\s*Device Node:\s+(\S+)/')
-    if [ -n "$dev" ]; then
-      hdiutil detach -force "$dev" >/dev/null 2>&1 || true
-      ORPHANS=$((ORPHANS + 1))
-    fi
-  done
-  if [ "$ORPHANS" -gt 0 ]; then
-    ok "ejetei $ORPHANS montagem(ns) órfã(s) de DMG — evita 'Resource busy'"
-  fi
-}
-
-has_self_signed_identity() {
-  security find-identity -p codesigning 2>/dev/null | grep -q "\"$SELF_SIGNED\""
-}
-
-# The self-signed identity gives the app a stable code signature, so macOS
-# keeps Full Disk Access across reinstalls (see scripts/create-signing-cert.sh).
 check_signing() {
-  if has_self_signed_identity; then
-    ok "identidade \"$SELF_SIGNED\" presente — permissões (FDA) sobrevivem ao reinstall"
-    return 0
-  fi
-  warn "sem identidade \"$SELF_SIGNED\" — o app será assinado ad-hoc e o macOS pedirá Full Disk Access de novo"
-  if [ "$INTERACTIVE" = 1 ] && [ "$ARG_YES" = 0 ] && confirm "Criar o certificado local agora? (scripts/create-signing-cert.sh)" s; then
-    ./scripts/create-signing-cert.sh
-    if has_self_signed_identity; then
-      ok "certificado criado"
-    else
-      warn "certificado não disponível — seguindo com assinatura ad-hoc"
-    fi
+  PROJECT_DIR="$ROOT"
+  source "$ROOT/scripts/signing.sh"
+  if [ "$COMMAND" = install ]; then export OILFIND_REQUIRE_STABLE_SIGNING=1; fi
+  resolve_signing_identity
+  if [ -n "$SIGN_IDENTITY" ]; then
+    ok "assinatura estável: $SIGN_IDENTITY"
+  else
+    warn "assinatura ad-hoc: use uma identidade estável antes de instalar em produção"
   fi
 }
 
@@ -172,21 +146,47 @@ ARG_NO_CLEAN=0
 ARG_YES=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    dev|build|test|package|install) COMMAND="$1" ;;
+    dev|build|test|package|install|clean|raycast) COMMAND="$1" ;;
     --patch) ARG_BUMP="patch" ;;
     --minor) ARG_BUMP="minor" ;;
     --major) ARG_BUMP="major" ;;
-    --version) shift; ARG_VERSION="${1:-}" ;;
+    --version) shift; ARG_VERSION="${1:?--version requires X.Y.Z}" ;;
     --version=*) ARG_VERSION="${1#*=}" ;;
     --no-clean) ARG_NO_CLEAN=1 ;;
     --yes|-y) ARG_YES=1 ;;
-    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) err "argumento desconhecido: $1 (use --help)"; exit 2 ;;
   esac
   shift
 done
 
 [ -n "$ARG_VERSION" ] && ! semver_ok "$ARG_VERSION" && { err "versão inválida: $ARG_VERSION (use X.Y.Z)"; exit 2; }
+
+if [ -z "$COMMAND" ]; then
+  if [ "$INTERACTIVE" = 1 ] && [ "$ARG_YES" = 0 ]; then
+    choice=$(ask_option \
+      "O que você quer fazer?" \
+      "install  PRODUÇÃO: sobrescreve o app em /Applications e reabre" \
+      "dev       build debug e abre o app de debug" \
+      "build     só o build release (bundle em build/)" \
+      "test      roda a suíte de testes" \
+      "package   release + zip + manifest de atualização p/ o site")
+    case "$choice" in
+      1) COMMAND="install" ;;
+      2) COMMAND="dev" ;;
+      3) COMMAND="build" ;;
+      4) COMMAND="test" ;;
+      5) COMMAND="package" ;;
+    esac
+  else
+    COMMAND="build"
+    info "sem comando — usando 'build' (padrão)"
+  fi
+fi
+
+if [ "$COMMAND" = clean ]; then exec "$ROOT/scripts/clean.sh" --quick; fi
+if [ "$COMMAND" = raycast ]; then exec "$ROOT/scripts/install-raycast.sh"; fi
+if [ "$COMMAND" = test ]; then exec swift test; fi
 
 # ==================================================================== main ==
 printf '%s' "$BOLD$MAGENTA"
@@ -255,7 +255,7 @@ step "2/5 · Limpeza"
 if [ "$ARG_NO_CLEAN" = 1 ]; then
   info "pulando limpeza (--no-clean)"
 elif [ "$ARG_YES" = 1 ] || [ "$INTERACTIVE" = 0 ]; then
-  rm -rf build
+  ./scripts/clean.sh --quick
   ok "limpo: bundles antigos removidos (cache do Swift em .build preservado)"
 else
   choice=$(ask_option \
@@ -265,13 +265,13 @@ else
     "Total — apagar build/ E .build (recompila tudo, lento)")
   case "$choice" in
     1) info "sem limpeza" ;;
-    2) rm -rf build; ok "bundles antigos removidos" ;;
+    2) ./scripts/clean.sh --quick; ok "bundles antigos removidos" ;;
     3)
       if confirm "Apagar build/ e .build ($(du_of .build)) — rebuild completo?" n; then
-        rm -rf build .build
+        ./scripts/clean.sh --full
         ok "build/ e .build removidos — recompila do zero"
       else
-        rm -rf build
+        ./scripts/clean.sh --quick
         ok "mantido .build; bundles antigos removidos"
       fi ;;
   esac
@@ -279,7 +279,6 @@ fi
 
 # --- step 3: pre-checks ------------------------------------------------------
 step "3/5 · Pré-checks"
-eject_orphan_dmg_mounts
 check_signing
 if [ "$GIT_DIRTY" != "0" ] && [ "$NEW_VERSION" != "$V_VERSION" ]; then
   warn "há $GIT_DIRTY alteração(ões) não commitada(s) junto com o bump de versão"
@@ -287,38 +286,17 @@ fi
 
 # --- step 4: build / action --------------------------------------------------
 step "4/5 · Ação"
-if [ -z "$COMMAND" ]; then
-  if [ "$INTERACTIVE" = 1 ] && [ "$ARG_YES" = 0 ]; then
-    choice=$(ask_option \
-      "O que você quer fazer?" \
-      "install  PRODUÇÃO: sobrescreve o app em /Applications e reabre" \
-      "dev       build debug e abre o app de debug" \
-      "build     só o build release (bundle em build/)" \
-      "test      roda a suíte de testes" \
-      "package   release + zip + manifest de atualização p/ o site")
-    case "$choice" in
-      1) COMMAND="install" ;;
-      2) COMMAND="dev" ;;
-      3) COMMAND="build" ;;
-      4) COMMAND="test" ;;
-      5) COMMAND="package" ;;
-    esac
-  else
-    COMMAND="build"
-    info "sem comando — usando 'build' (padrão)"
-  fi
-fi
 
 BUILD_START=$SECONDS
 case "$COMMAND" in
   dev)
-    ./scripts/build-app.sh --debug >/dev/null
+    ./scripts/build-app.sh --debug
     ok "debug app: $DEBUG_APP"
     open "$DEBUG_APP"
     ok "app de debug aberto (use --snapshot para validar a interface)"
     ;;
   build)
-    ./scripts/build-app.sh >/dev/null
+    ./scripts/build-app.sh
     ok "release app: $RELEASE_APP"
     ;;
   test)
@@ -329,7 +307,7 @@ case "$COMMAND" in
     ;;
   install)
     info "produção: saindo do app aberto, sobrescrevendo $INSTALL_APP e reabrindo…"
-    ./scripts/install.sh >/dev/null
+    ./scripts/install.sh
     ;;
 esac
 ok "concluído em $((SECONDS - BUILD_START))s"

@@ -1,3 +1,5 @@
+> Personal fork: content search is always included and in-app update checks are disabled. The upstream download and Pro descriptions below refer to the original distribution. Build and install this checkout with the local commands below.
+
 <p align="center">
   <img src="./assets/readme/hero.en.svg" width="100%" alt="Oil Find: Everything, for the Mac. Press ⇧⌘F and results appear as you type.">
 </p>
@@ -7,7 +9,7 @@
   &nbsp;·&nbsp;
   <a href="https://find.oiloil.org/en">Website</a>
   &nbsp;·&nbsp;
-  <a href="./README.zh-CN.md">简体中文</a>
+  <a href="./docs/archive/README.zh-CN.md">简体中文</a>
 </p>
 
 <p align="center">
@@ -92,7 +94,7 @@ Pro and the free version are the same download:
 
 - After downloading from Releases or the website, every free feature works right away and never expires, with no activation.
 - To use Pro, open the Oil Find Pro section in Settings and click Start 7-Day Free Trial, or enter a license key. When a trial ends, only Pro features turn off.
-- Building from source gives you the free version, without Pro.
+- This personal checkout always includes content search from the internal `Pro/` modules.
 - Images and documents are processed on your Mac and never uploaded.
 
 Buy it or read more at [find.oiloil.org/en/pro](https://find.oiloil.org/en/pro).
@@ -104,7 +106,7 @@ Buy it or read more at [find.oiloil.org/en/pro](https://find.oiloil.org/en/pro).
 3. Press ⇧⌘F and start typing.
 4. Optional: grant Full Disk Access to also search mail attachments and other apps' data. Oil Find works fine without it.
 
-When a new version is out, Oil Find tells you; click Update and Restart. You can turn off automatic checks in Settings.
+This personal build includes content search and does not check for updates inside the app. Use `./build.sh install` to update it locally.
 
 The download includes Pro, but you can keep using Oil Find for free without activating it. See [Oil Find Pro](#oil-find-pro) above for the difference.
 
@@ -115,14 +117,18 @@ To uninstall, quit Oil Find and delete Oil Find from Applications and `~/Library
 Requires macOS 14 and Swift 5.10 or later (Xcode 15.3 or newer).
 
 ```sh
-git clone https://github.com/oil-oil/oil-find.git
+git clone https://github.com/edgardmello/oil-find.git
 cd oil-find
 swift test
 scripts/build-app.sh   # builds build/Oil Find.app
-scripts/install.sh     # builds and installs into Applications
+./build.sh install     # builds, quits, replaces the production app and reopens it
+./build.sh raycast     # installs the matching Raycast extension
+./build.sh clean       # removes generated output, preserving Swift caches
+scripts/clean.sh --dry-run  # previews cleanup
+scripts/clean.sh --full     # also removes Swift caches
 ```
 
-Building from source gives you the free version, without Pro. For personal builds, use a stable code-signing identity to keep macOS permissions across rebuilds. List available identities with `security find-identity -v -p codesigning`. Put the fingerprint of an Apple Development or trusted local code-signing certificate on a single line in the git-ignored `.env.oilfind-sign-identity` file, or set `OILFIND_LOCAL_SIGN_IDENTITY` when running `scripts/build-app.sh`. After changing the signing identity, grant the app its permissions again. The same identity and bundle identifier are used on subsequent builds.
+This personal checkout always includes content search from the internal `Pro/` modules. For personal builds, use a stable code-signing identity to keep macOS permissions across rebuilds. List available identities with `security find-identity -v -p codesigning`. Put the fingerprint of an Apple Development or trusted local code-signing certificate on a single line in the git-ignored `.env.oilfind-sign-identity` file, or set `OILFIND_LOCAL_SIGN_IDENTITY` when running `scripts/build-app.sh`. Production installation requires a stable identity and checks the new app against the installed app’s designated requirement before quitting or replacing it. A mismatch cancels installation. Keep the certificate and bundle identifier unchanged to preserve existing permissions; macOS controls the final authorization state. The installer preserves settings and indexes and uses AppKit to quit without requesting Automation permission.
 
 ## Privacy
 
