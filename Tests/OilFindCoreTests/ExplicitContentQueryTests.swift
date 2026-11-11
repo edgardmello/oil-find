@@ -18,6 +18,16 @@ final class ExplicitContentQueryTests: XCTestCase {
         XCTAssertEqual(contents("[ui] [ux]"), [["ui"], ["ux"]])
     }
 
+    func testQuotedContentRetainsWholeWordIntentPerAlternative() {
+        for input in ["[\"jane\"]", "content:\"jane\"", "[!\"jane\"]"] {
+            XCTAssertTrue(Query.parse(input).clauses[0].alternatives[0].contentWholeWords, input)
+        }
+        let atoms = Query.parse("[jane|\"paid invoice\"]").clauses[0].alternatives
+        XCTAssertFalse(atoms[0].contentWholeWords)
+        XCTAssertTrue(atoms[1].contentWholeWords)
+        XCTAssertFalse(Query.parse("[jane]").clauses[0].alternatives[0].contentWholeWords)
+    }
+
     func testIncompleteContentQueryNeverBecomesFilenameOrRecents() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

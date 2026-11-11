@@ -61,7 +61,7 @@ final class ExplicitContentSearchTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        for (name, text) in [("letter.pdf", "Fernanda approved the payment."), ("fernanda.pdf", "An unrelated document.")] {
+        for (name, text) in [("letter.pdf", "Fernanda and Jane approved the payment."), ("fernanda.pdf", "An unrelated document in janeiro.")] {
             var box = CGRect(x: 0, y: 0, width: 612, height: 792)
             let context = try XCTUnwrap(CGContext(root.appendingPathComponent(name) as CFURL, mediaBox: &box, nil))
             context.beginPDFPage(nil)
@@ -78,10 +78,36 @@ final class ExplicitContentSearchTests: XCTestCase {
         let manager = ContentSearchManager(defaults: defaults, databaseURL: root.appendingPathComponent("content.sqlite"))
         defer { manager.stop() }
         let source = SearchSource(id: "test", displayName: "", isOnline: true, store: index)
-        for input in ["*.pdf [fernanda]", "ext:pdf [fernanda]", "kind:doc [fernanda]"] {
+        for input in ["*.pdf [fernanda]", "ext:pdf [fernanda]", "kind:doc [fernanda]", "ext:pdf [\"jane\"]", "ext:pdf content:\"jane\""] {
             let hits = manager.prepareSearch(Query.parse(input), options: SearchOptions(), sources: [source], isCancelled: { false })()
             XCTAssertEqual(hits.map { index.name($0.entryID) }, ["letter.pdf"], input)
         }
+    }
+
+    func testQuotedWordsAndPhrasesRequireUnicodeWordBoundaries() throws {
+        let exact = ContentTerm(text: "jane", caseSensitive: false, wholeWords: true)
+        for body in ["Jane", "(JANE),", "Olá, Jane!", "jane-smith", "jané.", "janeiro, then Jane."] {
+            XCTAssertTrue(ContentExtractor.matches(body: body, clauses: [[exact]], excluded: []), body)
+        }
+        for body in ["janeiro", "MaryJane", "jane2", "jane_smith", "éjane", "janeé"] {
+            XCTAssertFalse(ContentExtractor.matches(body: body, clauses: [[exact]], excluded: []), body)
+        }
+        let partial = ContentTerm(text: "jane", caseSensitive: false)
+        XCTAssertTrue(ContentExtractor.matches(body: "janeiro", clauses: [[partial]], excluded: []))
+        XCTAssertTrue(ContentExtractor.matches(body: "paid in janeiro", clauses: [[ContentTerm(text: "paid", caseSensitive: false)]], excluded: [exact]))
+        XCTAssertFalse(ContentExtractor.matches(body: "paid by Jane", clauses: [[ContentTerm(text: "paid", caseSensitive: false)]], excluded: [exact]))
+        let phrase = ContentTerm(text: "paid invoice", caseSensitive: false, wholeWords: true)
+        XCTAssertTrue(ContentExtractor.matches(body: "A paid invoice.", clauses: [[phrase]], excluded: []))
+        XCTAssertFalse(ContentExtractor.matches(body: "unpaid invoices", clauses: [[phrase]], excluded: []))
+        let presentation = ContentExtractor.makePresentation(body: "janeiro, then Jane.", terms: [exact], prefix: "")
+        XCTAssertEqual(presentation.highlights.map { (presentation.text as NSString).substring(with: $0) }, ["Jane"])
+
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let database = try ContentIndexDatabase(url: root.appendingPathComponent("content.sqlite"))
+        database.upsertBatch([(path: "/partial", mtime: 1, size: 1, body: "janeiro"),
+                              (path: "/exact", mtime: 1, size: 1, body: "Jane.")])
+        XCTAssertEqual(database.search(clauses: [[exact]], excluded: [], isCancelled: { false }).map(\.path), ["/exact"])
     }
 
     func testContentHitsUseCurrentVersionAfterUnrelatedIndexChanges() throws {

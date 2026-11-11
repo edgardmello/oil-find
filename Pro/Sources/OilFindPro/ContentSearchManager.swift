@@ -558,7 +558,9 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
             }
         }
         guard !clauseStrings.isEmpty else { return [] }
-        for neg in excluded {
+        // Spotlight prefix exclusions are broader than quoted whole-word exclusions.
+        // Verify those against the extracted body instead of dropping valid candidates.
+        for neg in excluded where !neg.wholeWords {
             let escaped = neg.text
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")
@@ -817,7 +819,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
             }) {
                 for atom in clause.alternatives {
                     if case .content(let text) = atom.matcher, !text.isEmpty {
-                        out.excludedContentTerms.append(ContentTerm(text: text, caseSensitive: false))
+                        out.excludedContentTerms.append(ContentTerm(text: text, caseSensitive: false, wholeWords: atom.contentWholeWords))
                     }
                 }
                 continue
@@ -831,7 +833,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                 }
                 switch atom.matcher {
                 case .content(let text):
-                    if text.isEmpty { isPureContentClause = false } else { terms.append(ContentTerm(text: text, caseSensitive: false)) }
+                    if text.isEmpty { isPureContentClause = false } else { terms.append(ContentTerm(text: text, caseSensitive: false, wholeWords: atom.contentWholeWords)) }
                 default:
                     isPureContentClause = false
                 }
