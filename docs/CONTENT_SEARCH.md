@@ -6,7 +6,7 @@ This personal build keeps filename and content search under your control:
 | --- | --- |
 | `client` | File names |
 | `[client]` | File contents only |
-| `["payment received"]` | That contiguous phrase in the contents, in the same order |
+| `["payment received"]` | That contiguous phrase in the contents, in the same order and bounded by whole words |
 | `content:client` | File contents only; equivalent to `[client]` |
 | `content:"payment received"` | A phrase in the contents |
 | `invoice [client]` | A filename containing invoice AND contents containing client |
@@ -15,7 +15,7 @@ This personal build keeps filename and content search under your control:
 | `[invoice|receipt]` | Either content alternative |
 | `[client] [!paid]` | Contents containing client and excluding paid |
 
-Content comparisons ignore capitalization and accents and match contiguous text. Short words such as `[UI]` also work. Quotes inside brackets preserve a literal `|`: `["a|b"]`. Use `|` inside brackets to express content alternatives. Content exclusions accompany a positive content term; an exclusion by itself does not enumerate every file. An unfinished bracket or empty `content:` expression never falls back to filename matches or recent files.
+Content comparisons ignore capitalization and accents and match contiguous text. Quotes require whole words at both ends: `["jane"]` matches `Jane` or `Jane,` but excludes `janeiro`, `MaryJane` and `jane2`. Unquoted `[jane]` retains partial matching. The same rule applies to `content:"jane"`, phrases, alternatives and quoted exclusions. Short words such as `[UI]` also work. Quotes inside brackets preserve a literal `|`: `["a|b"]`. Use `|` inside brackets to express content alternatives. Content exclusions accompany a positive content term; an exclusion by itself does not enumerate every file. An unfinished bracket or empty `content:` expression never falls back to filename matches or recent files.
 
 The normal filename engine, AI topic results and content results are not mixed for an explicit content query. Terms outside brackets remain filename/scope/type constraints for that content query. A filename containing a content term is insufficient: the extracted body must actually contain it.
 
