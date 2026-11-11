@@ -150,12 +150,7 @@ private struct ContentSearchSettingsSection: View {
                     ),
                     isOn: Binding(get: { manager.enabled }, set: manager.setEnabled)
                 )
-                Text(
-                    tr(
-                        "Pesquisa dentro de códigos, textos, Markdown, PDFs e documentos Office localmente em paralelo à busca por nome.",
-                        "Searches inside code, plain text, Markdown, PDFs and Office documents locally alongside filename search."
-                    )
-                )
+                Text(L10n.text("content.help"))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -171,10 +166,7 @@ private struct ContentSearchSettingsSection: View {
             .disabled(!manager.enabled)
 
             Toggle(
-                tr(
-                    "Documentos PDF, Office e RTF (.pdf, .docx, .pptx, .xlsx, .rtf…)",
-                    "PDF, Office and Rich Text documents (.pdf, .docx, .pptx, .xlsx, .rtf…)"
-                ),
+                L10n.text("content.documents"),
                 isOn: Binding(get: { manager.documentsEnabled }, set: manager.setDocumentsEnabled)
             )
             .disabled(!manager.enabled)

@@ -24,6 +24,7 @@ final class AITopicSearchProvider: AdditionalSearchProvider {
         return items.filter { item in item.availabilityScope.map(scopes.contains) ?? false }
     }
     func prepareSearch(_ query: Query, isCancelled: @escaping () -> Bool) -> () throws -> [AdditionalSearchItem] {
+        guard !query.hasContentTerms else { return { [] } }
         let images = Dictionary(uniqueKeysWithValues: AITopicProvider.allCases.map { ($0, icons.image($0)) })
         let terms = AITopicIndex.fold(query.raw).split(whereSeparator: { $0.isWhitespace }).map(String.init)
         return { [manager] in

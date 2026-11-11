@@ -59,6 +59,10 @@ public struct Query {
         return query
     }
     public var isEmpty: Bool { clauses.isEmpty }
+    /// Explicit content queries are resolved by the supplementary provider, never by filenames.
+    public var hasContentTerms: Bool {
+        clauses.contains { $0.alternatives.contains { if case .content = $0.matcher { return true }; return false } }
+    }
     public var isTimeDependent: Bool {
         clauses.contains { clause in
             clause.alternatives.contains { atom in
@@ -154,9 +158,9 @@ public struct Query {
             }
             for i in input.indices {
                 let c = input[i]
-                if c == "\"" { if start == nil { start = i }; quoted.toggle(); continue }
+                if c == "\"" { if start == nil { start = i }; if bracketed { token.append(c) }; quoted.toggle(); continue }
                 if !quoted {
-                    if c == "[", token.isEmpty { bracketed = true }
+                    if c == "[", token.isEmpty || token == "!" { bracketed = true }
                     else if c == "]", bracketed { bracketed = false }
                 }
                 if !quoted && !bracketed && (c.isWhitespace || c == "|") {
@@ -198,10 +202,21 @@ public struct Query {
                         return normalizePaste(original).lowercased().hasPrefix(key)
                     }) { originalRange = originalTokens[ordinal].range; originalCursor = ordinal + 1 }
                 }
-                if !wholePath, !neg, body.hasPrefix("["), body.hasSuffix("]"), body.count > 2 {
-                    let contents = body.dropFirst().dropLast()
-                    let terms = quoted ? [contents] : contents.split(separator: "|")
-                    alts.append(contentsOf: terms.map { Atom(negated: false, matcher: .content(String($0))) })
+                let rawToken = Range(t.range, in: source).map { source[$0] } ?? ""
+                if !wholePath, !rawToken.hasPrefix("\""), body.hasPrefix("[") {
+                    var contents = String(body.dropFirst())
+                    if contents.hasSuffix("]") { contents.removeLast() }
+                    let exclude = neg || contents.hasPrefix("!")
+                    if contents.hasPrefix("!") { contents.removeFirst() }
+                    var terms: [String] = [], term = "", inQuotes = false
+                    for character in contents {
+                        if character == "\"" { inQuotes.toggle() }
+                        else if character == "|" && !inQuotes {
+                            terms.append(term.trimmingCharacters(in: .whitespacesAndNewlines)); term = ""
+                        } else { term.append(character) }
+                    }
+                    terms.append(term.trimmingCharacters(in: .whitespacesAndNewlines))
+                    alts.append(contentsOf: terms.map { Atom(negated: exclude, matcher: .content($0)) })
                     if i + 1 == tokens.count || tokens[i + 1].body != "|" { flushClause() }
                     continue
                 }
@@ -308,7 +323,7 @@ private func parseMatcher(_ body: String, quoted: Bool, now: Date, home: String,
         case "path": return .path(components: pathComponents(value.lowercased(), home: home))
         case "fuzzy" where !value.isEmpty: return .fuzzyName(Array(value.lowercased().utf8))
         case "case": return .name(needle: Array(value.utf8), caseSensitive: true)
-        case "content" where !value.isEmpty: return .content(value)
+        case "content": return .content(value.trimmingCharacters(in: .whitespacesAndNewlines))
         case "tag": return .tag(value.trimmingCharacters(in: .whitespaces))
         case "regex":
             do { return .regex(try NSRegularExpression(pattern: value), onPath: value.contains("/")) }

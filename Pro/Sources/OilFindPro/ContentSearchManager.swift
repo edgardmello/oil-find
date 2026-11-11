@@ -165,9 +165,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
     }
 
     private func snippetPrefix() -> String {
-        let preferred = Locale.preferredLanguages.first?.lowercased() ?? "en"
-        if preferred.hasPrefix("pt") { return "Contém: " }
-        return "Contains: "
+        L10n.text("content.snippetPrefix")
     }
 
     public func prepareSearch(
@@ -201,11 +199,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
 
         let prefix = snippetPrefix()
         let flatTerms = parsed.contentClauses.flatMap { $0 }
-        // Require at least 3 characters (or non-ASCII such as CJK) before scanning file contents, or valid tag terms.
-        let hasSubstantialTerm = flatTerms.contains { term in
-            term.text.count >= 3 || term.text.unicodeScalars.contains(where: { $0.value >= 128 })
-        }
-        guard hasSubstantialTerm || !parsed.tagTerms.isEmpty else {
+        guard flatTerms.contains(where: { !$0.text.isEmpty }) || !parsed.tagTerms.isEmpty else {
             return { [] }
         }
 
@@ -224,9 +218,11 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
             }
             var hits: [SupplementaryHit] = []
             var seenEntries: [String: Set<UInt32>] = [:]
+            var checkedEntries: [String: [UInt32: OnDemandCandidate]] = [:]
 
             // Phase 1: Query our lock-free SQLite FTS5 content index, macOS Spotlight (MDQuery), and Finder Tags.
             var matchedBodiesByPath: [String: String] = [:]
+            var matchedMetadataByPath: [String: (mtime: UInt32, size: UInt64)] = [:]
             var spotlightPaths: [String] = []
 
             if let db = self.database, !parsed.contentClauses.isEmpty {
@@ -238,11 +234,12 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                 )
                 for match in dbMatches {
                     matchedBodiesByPath[match.path] = match.body
+                    matchedMetadataByPath[match.path] = (match.mtime, match.size)
                 }
             }
             if isCancelled() { return [] }
 
-            if flatTerms.contains(where: { $0.text.count >= 2 }) {
+            if flatTerms.contains(where: { !$0.text.isEmpty }) {
                 spotlightPaths = Self.querySpotlight(
                     clauses: parsed.contentClauses,
                     excluded: parsed.excludedContentTerms,
@@ -296,55 +293,48 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                 let store = source.store
 
                 if !candidatePaths.isEmpty {
-                    let resolvedHits: [SupplementaryHit] = Searcher.withEntryPredicates(flatAtoms, options: options, in: store, isCancelled: isCancelled) { matchAtom in
-                        var localHits: [SupplementaryHit] = []
+                    // Resolve under the index lock; read file contents only after releasing it.
+                    let candidates: [OnDemandCandidate] = Searcher.withEntryPredicates(flatAtoms, options: options, in: store, isCancelled: isCancelled) { matchAtom in
+                        var candidates: [OnDemandCandidate] = []
                         for path in candidatePaths {
                             if isCancelled() { return [] }
-                            guard let id = Self.resolveEntry(path: path, in: store) else { continue }
-                            guard Self.entryPassesFilter(
-                                id: id,
-                                in: store,
-                                options: options,
-                                allowCode: allowCode,
-                                allowDocs: allowDocs,
-                                allowNoise: allowNoise,
-                                clauseRanges: clauseRanges,
-                                matchAtom: matchAtom
-                            ) != nil else { continue }
-
-                            if seenEntries[source.id, default: []].insert(id).inserted {
-                                if let tagLabel = tagLabelsByPath[path], matchedBodiesByPath[path] == nil {
-                                    localHits.append(
-                                        SupplementaryHit(
-                                            sourceID: source.id,
-                                            entryID: id,
-                                            thumbnail: false,
-                                            sourceVersion: expectedVersion,
-                                            presentation: {
-                                                let label = "🏷️ " + tagLabel
-                                                return (label, [NSRange(location: 0, length: (label as NSString).length)])
-                                            }
-                                        )
-                                    )
-                                } else {
-                                    let knownBody = matchedBodiesByPath[path]
-                                    localHits.append(
-                                        self.makeHit(
-                                            sourceID: source.id,
-                                            entryID: id,
-                                            sourceVersion: expectedVersion,
-                                            path: path,
-                                            knownBody: knownBody,
-                                            flatTerms: flatTerms,
-                                            prefix: prefix
-                                        )
-                                    )
-                                }
-                            }
+                            guard let id = Self.resolveEntry(path: path, in: store),
+                                  let category = Self.entryPassesFilter(id: id, in: store, options: options,
+                                    allowCode: allowCode, allowDocs: allowDocs, allowNoise: allowNoise,
+                                    clauseRanges: clauseRanges, matchAtom: { ordinal, id in
+                                        let matched = matchAtom(ordinal, id)
+                                        return flatAtoms[ordinal].negated ? !matched : matched
+                                    }) else { continue }
+                            candidates.append(OnDemandCandidate(id: id, path: path, mtime: store.mtime[Int(id)],
+                                                                size: store.size(id), category: category))
                         }
-                        return localHits
+                        return candidates
                     }
-                    hits.append(contentsOf: resolvedHits)
+                    for candidate in candidates {
+                        if isCancelled() { return [] }
+                        if seenEntries[source.id]?.contains(candidate.id) == true { continue }
+                        checkedEntries[source.id, default: [:]][candidate.id] = candidate
+                        if parsed.contentClauses.isEmpty, let tagLabel = tagLabelsByPath[candidate.path] {
+                            seenEntries[source.id, default: []].insert(candidate.id)
+                            hits.append(SupplementaryHit(sourceID: source.id, entryID: candidate.id,
+                                sourceVersion: expectedVersion, presentation: {
+                                    let label = "🏷️ " + tagLabel
+                                    return (label, [NSRange(location: 0, length: (label as NSString).length)])
+                                }))
+                            continue
+                        }
+                        // Spotlight supplies candidates, not proof of a literal phrase in the body.
+                        let indexed = matchedMetadataByPath[candidate.path]
+                        let currentBody = indexed?.mtime == candidate.mtime && indexed?.size == candidate.size
+                            ? matchedBodiesByPath[candidate.path] : nil
+                        let body = currentBody ?? ContentExtractor.extractText(at: candidate.path, category: candidate.category)
+                        guard let body, ContentExtractor.matches(body: body, clauses: parsed.contentClauses,
+                                                                  excluded: parsed.excludedContentTerms) else { continue }
+                        seenEntries[source.id, default: []].insert(candidate.id)
+                        hits.append(self.makeHit(sourceID: source.id, entryID: candidate.id,
+                            sourceVersion: expectedVersion, knownBody: body,
+                            flatTerms: flatTerms, prefix: prefix))
+                    }
                 }
 
                 if isCancelled() { return [] }
@@ -368,16 +358,19 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                     var newlyExtracted: [(path: String, mtime: UInt32, size: UInt64, body: String)] = []
                     let deadline = CFAbsoluteTimeGetCurrent() + (parsed.hasExplicitPathFilter ? 1.0 : 0.75)
 
+                    let taggedPaths = Set(tagMatchedPaths)
                     for candidate in onDemandCandidates {
+                        if !parsed.tagTerms.isEmpty && !taggedPaths.contains(candidate.path) { continue }
                         if isCancelled() || CFAbsoluteTimeGetCurrent() > deadline { break }
                         if seenEntries[source.id]?.contains(candidate.id) == true { continue }
+                        checkedEntries[source.id, default: [:]][candidate.id] = candidate
 
                         self.lock.lock()
                         let cached = self.indexedMeta[candidate.path]
                         let cachedBody = self.snippetCache[candidate.path]
                         self.lock.unlock()
-                        if let cached, cached.mtime == candidate.mtime && cached.size == candidate.size {
-                            if let cachedBody, ContentExtractor.matches(body: cachedBody, clauses: parsed.contentClauses, excluded: parsed.excludedContentTerms) {
+                        if let cached, cached.mtime == candidate.mtime && cached.size == candidate.size, let cachedBody {
+                            if ContentExtractor.matches(body: cachedBody, clauses: parsed.contentClauses, excluded: parsed.excludedContentTerms) {
                                 if seenEntries[source.id, default: []].insert(candidate.id).inserted {
                                     hits.append(
                                         SupplementaryHit(
@@ -432,73 +425,45 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                     }
                 }
             }
-            return hits
+            // Stamp against the final source snapshot, retaining only unchanged entries that
+            // still pass the query. Unrelated index mutations do not invalidate their text.
+            let online = sources.filter(\.isOnline)
+            func validateLocked(_ position: Int) -> [SupplementaryHit] {
+                if position < online.count { return online[position].store.read { validateLocked(position + 1) } }
+                var validated: [SupplementaryHit] = []
+                for source in online {
+                    if isCancelled() { return [] }
+                    let store = source.store
+                    let sourceHits = hits.filter { $0.sourceID == source.id }
+                    let current: [SupplementaryHit] = Searcher.withEntryPredicates(flatAtoms, options: options, in: store, isCancelled: isCancelled) { matchAtom in
+                        sourceHits.compactMap { hit in
+                            guard let entry = checkedEntries[source.id]?[hit.entryID],
+                                  Int(entry.id) < store.count, store.isLive(entry.id),
+                                  store.mtime[Int(entry.id)] == entry.mtime, store.size(entry.id) == entry.size,
+                                  store.path(entry.id) == entry.path,
+                                  Self.entryPassesFilter(id: entry.id, in: store, options: options,
+                                    allowCode: allowCode, allowDocs: allowDocs, allowNoise: allowNoise,
+                                    clauseRanges: clauseRanges, matchAtom: { ordinal, id in
+                                        let matched = matchAtom(ordinal, id)
+                                        return flatAtoms[ordinal].negated ? !matched : matched
+                                    }) != nil else { return nil }
+                            return SupplementaryHit(sourceID: source.id, entryID: entry.id, thumbnail: hit.thumbnail,
+                                sourceVersion: store.version, presentation: { hit.presentation })
+                        }
+                    }
+                    validated.append(contentsOf: current)
+                }
+                return validated
+            }
+            return validateLocked(0)
         }
     }
 
-    private func makeHit(
-        sourceID: String,
-        entryID: UInt32,
-        sourceVersion: UInt64,
-        path: String,
-        knownBody: String?,
-        flatTerms: [ContentTerm],
-        prefix: String
-    ) -> SupplementaryHit {
-        if let knownBody {
-            return SupplementaryHit(
-                sourceID: sourceID,
-                entryID: entryID,
-                thumbnail: false,
-                sourceVersion: sourceVersion,
-                presentation: {
-                    ContentExtractor.makePresentation(body: knownBody, terms: flatTerms, prefix: prefix)
-                }
-            )
-        }
-
-        // For Spotlight matches whose body is not yet in SQLite, try extracting fast text (< 512 KB) or fall back to term highlight.
-        return SupplementaryHit(
-            sourceID: sourceID,
-            entryID: entryID,
-            thumbnail: false,
-            sourceVersion: sourceVersion,
-            presentation: { [weak self] in
-                if let self {
-                    self.lock.lock()
-                    let cachedBody = self.snippetCache[path]
-                    self.lock.unlock()
-                    if let cachedBody {
-                        return ContentExtractor.makePresentation(body: cachedBody, terms: flatTerms, prefix: prefix)
-                    }
-                }
-
-                let ext = (path as NSString).pathExtension.lowercased()
-                let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? UInt64) ?? 0
-                if size > 0 && size <= 512 * 1024,
-                   let category = ContentExtractor.fileCategory(name: (path as NSString).lastPathComponent, kind: ext == "pdf" ? 3 : 7, size: size),
-                   let extracted = ContentExtractor.extractText(at: path, category: category),
-                   ContentExtractor.matches(body: extracted, clauses: [flatTerms], excluded: []) {
-                    if let self {
-                        self.lock.lock()
-                        self.snippetCache[path] = extracted
-                        self.lock.unlock()
-                    }
-                    return ContentExtractor.makePresentation(body: extracted, terms: flatTerms, prefix: prefix)
-                }
-
-                // Immediate non-blocking presentation for multi-hundred-page PDFs matched via Spotlight.
-                let joined = flatTerms.map(\.text).joined(separator: ", ")
-                let text = prefix + "“\(joined)”"
-                var highlights: [NSRange] = []
-                for term in flatTerms where !term.text.isEmpty {
-                    if let r = text.range(of: term.text, options: [.caseInsensitive, .diacriticInsensitive]) {
-                        highlights.append(NSRange(r, in: text))
-                    }
-                }
-                return (text, highlights)
-            }
-        )
+    private func makeHit(sourceID: String, entryID: UInt32, sourceVersion: UInt64,
+                         knownBody: String, flatTerms: [ContentTerm], prefix: String) -> SupplementaryHit {
+        SupplementaryHit(sourceID: sourceID, entryID: entryID, sourceVersion: sourceVersion, presentation: {
+            ContentExtractor.makePresentation(body: knownBody, terms: flatTerms, prefix: prefix)
+        })
     }
 
     private static func resolveEntry(path: String, in store: IndexStore) -> UInt32? {
@@ -618,8 +583,16 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
             return []
         }
         MDQuerySetMaxCount(mdQuery, limit)
-        let ok = MDQueryExecute(mdQuery, CFOptionFlags(kMDQuerySynchronous.rawValue))
-        guard ok, !isCancelled() else { return [] }
+        guard MDQueryExecute(mdQuery, 0) else { return [] }
+        defer { MDQueryStop(mdQuery) }
+        let deadline = CFAbsoluteTimeGetCurrent() + 0.5
+        while !MDQueryIsGatheringComplete(mdQuery) && CFAbsoluteTimeGetCurrent() < deadline {
+            if isCancelled() { return [] }
+            CFRunLoopRunInMode(.defaultMode, 0.01, true)
+        }
+        guard !isCancelled() else { return [] }
+        let completed = MDQueryIsGatheringComplete(mdQuery)
+        MDQueryDisableUpdates(mdQuery)
         let count = MDQueryGetResultCount(mdQuery)
         var paths: [String] = []
         if count > 0 {
@@ -633,12 +606,12 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                 }
             }
         }
-        spotlightCacheLock.lock()
-        if spotlightCache.count >= 32 {
-            spotlightCache.removeAll(keepingCapacity: true)
+        if completed {
+            spotlightCacheLock.lock()
+            if spotlightCache.count >= 32 { spotlightCache.removeAll(keepingCapacity: true) }
+            spotlightCache[cacheKey] = (CFAbsoluteTimeGetCurrent(), paths)
+            spotlightCacheLock.unlock()
         }
-        spotlightCache[cacheKey] = (CFAbsoluteTimeGetCurrent(), paths)
-        spotlightCacheLock.unlock()
         return paths
     }
 
@@ -738,7 +711,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                 let kind = store.kind[rawID]
                 if let requiredKind, kind != requiredKind { continue }
                 // Fast pre-filter by kind: 3 (doc), 7 (code), or 0 (other text files).
-                if kind != 3 && kind != 7 && kind != 0 { continue }
+                if kind != 3 && kind != 7 && kind != 0 && kind != 4 { continue }
                 if store.sizeC[rawID] == 0 { continue }
 
                 let id = UInt32(rawID)
@@ -746,7 +719,8 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                 for range in clauseRanges {
                     var clauseMatched = false
                     for ordinal in range {
-                        if matchAtom(ordinal, id) {
+                        let matched = matchAtom(ordinal, id)
+                        if flatAtoms[ordinal].negated ? !matched : matched {
                             clauseMatched = true
                             break
                         }
@@ -813,12 +787,6 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
 
     private static func decomposeQuery(_ query: Query) -> DecomposedQuery {
         var out = DecomposedQuery()
-        let hasExplicitContent = query.clauses.contains { clause in
-            clause.alternatives.contains { atom in
-                if case .content = atom.matcher, !atom.negated { return true }
-                return false
-            }
-        }
         for clause in query.clauses {
             if clause.alternatives.contains(where: {
                 if case .foldersOnly = $0.matcher, !$0.negated { return true }
@@ -844,6 +812,16 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                 continue
             }
 
+            if !clause.alternatives.isEmpty, clause.alternatives.allSatisfy({ atom in
+                if case .content = atom.matcher { return atom.negated }; return false
+            }) {
+                for atom in clause.alternatives {
+                    if case .content(let text) = atom.matcher, !text.isEmpty {
+                        out.excludedContentTerms.append(ContentTerm(text: text, caseSensitive: false))
+                    }
+                }
+                continue
+            }
             var terms: [ContentTerm] = []
             var isPureContentClause = !clause.alternatives.isEmpty
             for atom in clause.alternatives {
@@ -853,13 +831,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                 }
                 switch atom.matcher {
                 case .content(let text):
-                    terms.append(ContentTerm(text: text, caseSensitive: false))
-                case .name(let needle, let cs) where !hasExplicitContent:
-                    let str = String(decoding: needle, as: UTF8.self)
-                    if str.isEmpty { isPureContentClause = false } else { terms.append(ContentTerm(text: str, caseSensitive: cs)) }
-                case .fileName(let needle) where !hasExplicitContent:
-                    let str = String(decoding: needle, as: UTF8.self)
-                    if str.isEmpty { isPureContentClause = false } else { terms.append(ContentTerm(text: str, caseSensitive: false)) }
+                    if text.isEmpty { isPureContentClause = false } else { terms.append(ContentTerm(text: text, caseSensitive: false)) }
                 default:
                     isPureContentClause = false
                 }
@@ -980,7 +952,7 @@ public final class ContentSearchManager: ObservableObject, SupplementarySearchPr
                             if flags & (SiftFlag.noise | SiftFlag.inPackage | SiftFlag.hidden) != 0 { continue }
                         }
                         let kind = store.kind[rawID]
-                        if kind != 3 && kind != 7 && kind != 0 { continue }
+                        if kind != 3 && kind != 7 && kind != 0 && kind != 4 { continue }
                         let id = UInt32(rawID)
                         let size = store.size(id)
                         guard size > 0 else { continue }
