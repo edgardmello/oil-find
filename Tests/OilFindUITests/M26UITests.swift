@@ -5,6 +5,16 @@ import OilFindCore
 @testable import OilFindApp
 
 final class M26UITests: XCTestCase {
+    /// The native preview panel is process-wide and hides asynchronously; wait until it is gone
+    /// so later tests do not see it as an open preview (Space would then close it instead of typing).
+    /// Calling orderOut repeatedly interrupts the panel's own close transition, so only wait here.
+    private func dismissSharedPreviewPanel() {
+        let deadline = Date().addingTimeInterval(3)
+        while QLPreviewPanel.shared().isVisible && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        if QLPreviewPanel.shared().isVisible { QLPreviewPanel.shared().orderOut(nil) }
+    }
     private func fixture() throws -> (URL, IndexStore, IndexConfig) {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("OilFindM26-" + UUID().uuidString)
@@ -79,6 +89,7 @@ extension M26UITests {
     }
     func testSpaceInputBrowsingMarkedTextAndDisabledPreference() throws {
         let (root, store, _) = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+        dismissSharedPreviewPanel()
         let suite = "OilFindM26UI-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
         let controller = SearchViewController(snapshot: true, preferences: defaults)
@@ -128,8 +139,7 @@ extension M26UITests {
             // Tear down the process-wide native panel before the next controller test.
             QLPreviewPanel.shared().close()
             panel.close()
-            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-            QLPreviewPanel.shared().orderOut(nil)
+            dismissSharedPreviewPanel()
         }
         let controller = panel.searchController
         try controller.prepareSnapshot(state: "results", query: "row", options: .init(sort: .name, ascending: true), store: store, selection: 0)
@@ -164,8 +174,7 @@ extension M26UITests {
             panel.searchController.quickLook.close()
             QLPreviewPanel.shared().close()
             panel.close()
-            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-            QLPreviewPanel.shared().orderOut(nil)
+            dismissSharedPreviewPanel()
         }
         let controller = panel.searchController
         try controller.prepareSnapshot(state: "results", query: "row", options: .init(sort: .name, ascending: true), store: store, selection: 0)
@@ -315,6 +324,7 @@ extension M26UITests {
 extension M26UITests {
     func testSpaceOnOfflineResultKeepsUnavailableMessage() throws {
         let (root, store, _) = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+        dismissSharedPreviewPanel()
         let source = SearchSource(id: "archive", displayName: "Archive", isOnline: false, store: store)
         let controller = SearchViewController(snapshot: true)
         // The native preview panel is process-wide and can still be on screen from an earlier test,
