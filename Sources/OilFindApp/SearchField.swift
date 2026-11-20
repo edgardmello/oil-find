@@ -139,16 +139,24 @@ final class SearchField: FlippedView, NSTextFieldDelegate {
             clear.frame = NSRect(x: right - 22, y: box.midY - 11, width: 22, height: 22)
             progress.frame = NSRect(x: right - 19, y: box.midY - 8, width: 16, height: 16)
             let textHeight = ceil(20 * textScale)
-            input.frame = NSRect(x: box.minX + 10, y: box.midY - textHeight / 2, width: max(0, right - 26 - box.minX - 10), height: textHeight)
+            setInputFrame(NSRect(x: box.minX + 10, y: box.midY - textHeight / 2, width: max(0, right - 26 - box.minX - 10), height: textHeight))
             expand.frame = .zero
             return
         }
         glass.frame = NSRect(x: 24, y: (bounds.height - 22) / 2, width: 22, height: 22)
         let textHeight = ceil(29 * textScale)
-        input.frame = NSRect(x: 58, y: (bounds.height - textHeight) / 2, width: max(0, bounds.width - (showExpand ? 136 : 112)), height: textHeight)
+        setInputFrame(NSRect(x: 58, y: (bounds.height - textHeight) / 2, width: max(0, bounds.width - (showExpand ? 136 : 112)), height: textHeight))
         expand.frame = NSRect(x: bounds.width - 42, y: (bounds.height - 24) / 2, width: 24, height: 24)
         clear.frame = NSRect(x: bounds.width - (showExpand ? 78 : 48), y: (bounds.height - 28) / 2, width: 28, height: 28)
         progress.frame = NSRect(x: bounds.width - (showExpand ? 68 : 44), y: (bounds.height - 16) / 2, width: 16, height: 16)
+    }
+    /// Resizing an NSTextField while it is being edited selects all of its text; keep the caret where it was.
+    private func setInputFrame(_ frame: NSRect) {
+        guard input.frame != frame else { return }
+        let editing = input.currentEditor() as? NSTextView
+        let selection = editing?.selectedRange()
+        input.frame = frame
+        if let editing, let selection, editing.selectedRange() != selection { editing.setSelectedRange(selection) }
     }
     func focus(selectAll: Bool = false) {
         window?.makeFirstResponder(input)

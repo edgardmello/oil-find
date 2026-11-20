@@ -8,6 +8,9 @@ final class WindowTitleBar: FlippedView {
     var onZoom: (() -> Void)?
     var onPin: (() -> Void)?
     var onQuit: (() -> Void)?
+    /// Dragging the strip moves the window; a double-click puts it back in its default place.
+    var onDragEnded: (() -> Void)?
+    var onResetPosition: (() -> Void)?
     var pinned = false { didSet { pin.active = pinned } }
     private let lights = TrafficLights()
     private let pin = TitleTextButton(symbol: "pin", title: "")
@@ -29,7 +32,21 @@ final class WindowTitleBar: FlippedView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    override func mouseDown(with event: NSEvent) {
+        guard let window else { return }
+        if event.clickCount == 2 { onResetPosition?(); return }
+        let start = NSEvent.mouseLocation, origin = window.frame.origin
+        var moved = false
+        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]), next.type == .leftMouseDragged {
+            let now = NSEvent.mouseLocation
+            window.setFrameOrigin(NSPoint(x: origin.x + now.x - start.x, y: origin.y + now.y - start.y))
+            moved = true
+        }
+        if moved { onDragEnded?() }
+    }
+
     func localize() {
+        toolTip = L10n.text("titlebar.moveHelp")
         pin.title = L10n.text("titlebar.pin"); pin.toolTip = L10n.text("titlebar.pinHelp")
         quit.title = L10n.text("titlebar.quit"); quit.toolTip = L10n.text("titlebar.quitHelp")
         lights.titles = [L10n.text("titlebar.close"), L10n.text("titlebar.minimize"), L10n.text("titlebar.zoom")]
@@ -73,6 +90,8 @@ private final class TrafficLights: NSView {
     }
     override func mouseEntered(with event: NSEvent) { hovered = true }
     override func mouseExited(with event: NSEvent) { hovered = false }
+    // Keep the press here so the title bar does not start a window drag.
+    override func mouseDown(with event: NSEvent) {}
     override func mouseUp(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if let index = (0..<3).first(where: { rect($0).insetBy(dx: -3, dy: -3).contains(point) }) { onPress?(index) }

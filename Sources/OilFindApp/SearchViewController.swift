@@ -204,6 +204,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         titleBar.onZoom = { [weak self] in self?.toggleInlinePreview() }
         titleBar.onPin = { [weak self] in self?.togglePin() }
         titleBar.onQuit = { NSApp.terminate(nil) }
+        titleBar.onDragEnded = { [weak self] in (self?.view.window as? SearchPanel)?.rememberPosition() }
+        titleBar.onResetPosition = { [weak self] in (self?.view.window as? SearchPanel)?.forgetPosition() }
         for (tool, button) in fieldTools {
             button.onPress = { [weak self] anchor in self?.filters.popUp(tool, from: anchor) }
         }

@@ -145,7 +145,7 @@ public enum L10n {
         "tiles.searchOnly": "Search only", "tiles.searchInside": "Search inside",
         "titlebar.pin": "Pin", "titlebar.pinHelp": "Keep the search window open when you switch apps",
         "titlebar.quit": "Quit", "titlebar.quitHelp": "Quit Oil Find",
-        "titlebar.close": "Close", "titlebar.minimize": "Hide", "titlebar.zoom": "Show or hide the side preview",
+        "titlebar.moveHelp": "Drag to move the window, double-click to centre it again", "titlebar.close": "Close", "titlebar.minimize": "Hide", "titlebar.zoom": "Show or hide the side preview",
         "sort.relevance": "Relevance", "sort.name": "Name",
         "sort.modified": "Date Modified", "sort.size": "Size",
         "footer.results": "%@ items · %@ ms",

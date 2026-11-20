@@ -20,7 +20,7 @@ final class MultipleSelectionTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: Theme.panelSize), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentViewController = controller
         defer { window.close() }
-        try controller.prepareSnapshot(state: "results", query: "row", options: .init(sort: .name), store: store, selection: 1)
+        try controller.prepareSnapshot(state: "results", query: "row", options: .init(sort: .name, ascending: true), store: store, selection: 1)
         controller.view.layoutSubtreeIfNeeded()
         let results = controller.results
         let table = try XCTUnwrap(results.subviews.compactMap { $0 as? NSScrollView }.first?.documentView as? NSTableView)

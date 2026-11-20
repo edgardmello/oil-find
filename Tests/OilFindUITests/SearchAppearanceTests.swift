@@ -110,6 +110,27 @@ final class SearchAppearanceTests: XCTestCase {
         XCTAssertNil(controller.filters.options.kind)
     }
 
+    func testDraggedSearchWindowKeepsItsCornerUntilReset() throws {
+        _ = NSApplication.shared
+        let screen = try XCTUnwrap(NSScreen.main ?? NSScreen.screens.first)
+        let panel = SearchPanel(snapshot: true)
+        defer { panel.close() }
+        panel.resizeForInlinePreview(display: false)
+        let centred = panel.frame
+        let area = screen.visibleFrame
+        panel.setFrameOrigin(NSPoint(x: area.minX + 20, y: area.maxY - 20 - centred.height))
+        panel.rememberPosition()
+        let corner = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)
+        panel.searchController.setInlinePreviewVisible(true, resize: false)
+        panel.resizeForInlinePreview(display: false)
+        XCTAssertEqual(panel.frame.minX, corner.x)
+        XCTAssertEqual(panel.frame.maxY, corner.y)
+        XCTAssertGreaterThan(panel.frame.width, centred.width, "The preview widens the window to the right of the kept corner")
+        panel.forgetPosition()
+        XCTAssertNil(panel.customTopLeft)
+        XCTAssertEqual(panel.frame.midX, area.midX, accuracy: 1)
+    }
+
     func testResultsMenuNoLongerOffersLayoutChoices() throws {
         _ = NSApplication.shared
         let controller = SearchViewController(snapshot: true)

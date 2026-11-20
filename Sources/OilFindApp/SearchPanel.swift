@@ -89,7 +89,11 @@ private final class WindowFade: NSAnimation, NSAnimationDelegate {
 
 final class SearchPanel: NSPanel {
     static let collapsedHeight: CGFloat = 64
+    private static let positionKey = "searchWindowTopLeft"
     let searchController: SearchViewController
+    private let snapshot: Bool
+    /// Top-left corner the Search Window was dragged to; nil keeps the default centred placement.
+    private(set) var customTopLeft: NSPoint?
     private(set) var hiding = false
     private var animationGeneration = 0
     private var fade: WindowFade?
@@ -97,6 +101,8 @@ final class SearchPanel: NSPanel {
     override var canBecomeMain: Bool { false }
     init(snapshot: Bool = false) {
         searchController = SearchViewController(snapshot: snapshot)
+        self.snapshot = snapshot
+        if !snapshot, let saved = UserDefaults.standard.string(forKey: Self.positionKey) { customTopLeft = NSPointFromString(saved) }
         super.init(contentRect: NSRect(origin: .zero, size: Theme.panelSize), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         level = .floating; collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         isMovable = false; hidesOnDeactivate = false; isOpaque = false; backgroundColor = .clear; hasShadow = true
@@ -127,10 +133,27 @@ final class SearchPanel: NSPanel {
         let expandedHeight = min(size.height, visible.height - 120)
         let height = searchController.barCollapsed ? Self.collapsedHeight : expandedHeight
         let top = (visible.midY + expandedHeight / 2).rounded()
-        let frame = NSRect(x: (visible.midX - width / 2).rounded(), y: top - height,
+        var frame = NSRect(x: (visible.midX - width / 2).rounded(), y: top - height,
                            width: width, height: height)
+        if searchController.searchInterface == .window, let custom = customTopLeft,
+           let home = NSScreen.screens.first(where: { $0.visibleFrame.contains(NSPoint(x: custom.x + 1, y: custom.y - 1)) }) {
+            // Keep the dragged corner, but never let the window spill off the screen it was left on.
+            let area = home.visibleFrame
+            let x = min(max(custom.x, area.minX), area.maxX - width)
+            let top = min(max(custom.y, area.minY + height), area.maxY)
+            frame = NSRect(x: x.rounded(), y: (top - height).rounded(), width: width, height: height)
+        }
         setFrame(frame, display: display)
         invalidateShadow()
+    }
+    func rememberPosition() {
+        customTopLeft = NSPoint(x: frame.minX, y: frame.maxY)
+        if !snapshot, let customTopLeft { UserDefaults.standard.set(NSStringFromPoint(customTopLeft), forKey: Self.positionKey) }
+    }
+    func forgetPosition() {
+        customTopLeft = nil
+        if !snapshot { UserDefaults.standard.removeObject(forKey: Self.positionKey) }
+        resizeForInlinePreview()
     }
     func show(source: PanelSource = .interaction) {
         let cold = !isVisible
