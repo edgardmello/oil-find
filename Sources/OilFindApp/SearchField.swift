@@ -85,7 +85,18 @@ final class SearchField: FlippedView, NSTextFieldDelegate {
         super.layout()
         glass.frame = NSRect(x: 24, y: (bounds.height - 22) / 2, width: 22, height: 22)
         let textHeight = ceil(29 * textScale)
-        input.frame = NSRect(x: 58, y: (bounds.height - textHeight) / 2, width: max(0, bounds.width - (showExpand ? 136 : 112)), height: textHeight)
+        let inputFrame = NSRect(x: 58, y: (bounds.height - textHeight) / 2, width: max(0, bounds.width - (showExpand ? 136 : 112)), height: textHeight)
+        if input.frame != inputFrame {
+            // Resizing an NSTextField while it is being edited makes AppKit select its whole text,
+            // so the next keystroke would replace the query (e.g. after Quick Look closes).
+            let selection = input.currentEditor() === editor ? editor.selectedRange : nil
+            input.frame = inputFrame
+            if let selection, input.currentEditor() === editor {
+                let length = (editor.string as NSString).length
+                let location = min(selection.location, length)
+                editor.selectedRange = NSRange(location: location, length: min(selection.length, length - location))
+            }
+        }
         expand.frame = NSRect(x: bounds.width - 42, y: (bounds.height - 24) / 2, width: 24, height: 24)
         clear.frame = NSRect(x: bounds.width - (showExpand ? 78 : 48), y: (bounds.height - 28) / 2, width: 28, height: 28)
         progress.frame = NSRect(x: bounds.width - (showExpand ? 68 : 44), y: (bounds.height - 16) / 2, width: 16, height: 16)
