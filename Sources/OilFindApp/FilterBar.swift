@@ -42,19 +42,19 @@ final class FilterBar: FlippedView, NSMenuDelegate {
             refresh(); needsLayout = true
         }
     }
-    private let scopeButton = ChromeButton("", style: .plain, size: 12, weight: .medium)
+    private let scopeButton = ChromeButton("", style: .toolbar, size: 12, weight: .medium)
     var scopeActive = false { didSet { refreshScope() } }
     var scopeMenu: (() -> NSMenu)?
     var searchOptionsMenu: (() -> NSMenu)?
     var savedMenu: (() -> NSMenu)?
     var viewMenu: (() -> NSMenu)?
     var searchOptionsActive = false { didSet { refreshScope() } }
-    private let searchOptionsButton = ChromeButton("", style: .plain, size: 12, weight: .medium)
-    private let savedButton = ChromeButton("", style: .plain, size: 12, weight: .medium)
-    private let viewButton = ChromeButton("", style: .plain, size: 12, weight: .medium)
-    private let categoryButton = ChromeButton("", style: .plain, size: 12, weight: .medium)
+    private let searchOptionsButton = ChromeButton("", style: .toolbar, size: 12, weight: .medium)
+    private let savedButton = ChromeButton("", style: .toolbar, size: 12, weight: .medium)
+    private let viewButton = ChromeButton("", style: .toolbar, size: 12, weight: .medium)
+    private let categoryButton = ChromeButton("", style: .toolbar, size: 12, weight: .medium)
     private var toolbarButtons: [ChromeButton] { [scopeButton, searchOptionsButton, savedButton, viewButton, sortButton] }
-    private let sortButton = ChromeButton("", style: .plain, size: 12, weight: .medium)
+    private let sortButton = ChromeButton("", style: .toolbar, size: 12, weight: .medium)
     var onChange: (() -> Void)?
     var onMenuTracking: ((Bool) -> Void)?
     var onSortChange: (() -> Void)?
@@ -103,6 +103,8 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         searchOptionsButton.title = L10n.text("scope.options")
         savedButton.title = L10n.text("scope.saved")
         viewButton.title = L10n.text("scope.view")
+        searchOptionsButton.active = searchOptionsActive
+        scopeButton.active = scopeActive
         searchOptionsButton.textTint = searchOptionsActive ? activeTint : nil
         searchOptionsButton.needsDisplay = true
         scopeButton.textTint = scopeActive ? activeTint : nil
@@ -144,12 +146,17 @@ final class FilterBar: FlippedView, NSMenuDelegate {
     @objc private func selectCategory(_ item: NSMenuItem) { select(item.tag) }
 
     private func refresh() {
-        for (index, button) in buttons.enumerated() { button.active = index == selectedCategory }
+        for (index, button) in buttons.enumerated() {
+            button.active = index == selectedCategory
+            button.toolTip = button.title + (index < 9 ? " (⌘" + String(index + 1) + ")" : "")
+            button.setAccessibilityLabel(button.title)
+        }
         categoryButton.title = buttons[selectedCategory].title
         categoryButton.textTint = selectedCategory == 0 ? nil : activeTint
-        categoryButton.setAccessibilityLabel(L10n.text("settings.interface.fileType", categoryButton.title))
+        categoryButton.toolTip = L10n.text("settings.interface.fileType", categoryButton.title)
+        categoryButton.setAccessibilityLabel(categoryButton.toolTip)
         categoryButton.needsDisplay = true
-        if compactToolbar { needsLayout = true }
+        needsLayout = true
         let sortTitle = L10n.text("sort." + Self.sortName(options.sort))
         let changedSort = sortButton.title != sortTitle
         sortButton.title = sortTitle; sortButton.needsDisplay = true
@@ -159,7 +166,7 @@ final class FilterBar: FlippedView, NSMenuDelegate {
     override func layout() {
         super.layout()
         if classicToolbar {
-            let width = Theme.textWidth(sortButton.title, font: sortButton.font!) + 24
+            let width = Theme.textWidth(sortButton.title, font: sortButton.font!) + 32
             sortButton.frame = NSRect(x: bounds.width - 18 - width, y: 7, width: width, height: 26)
             layoutCategoryChips(y: 7, rightInset: width + 12)
             laidOut = true
@@ -169,7 +176,7 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         if !compactToolbar { layoutCategoryChips() }
         let controls = compactToolbar ? [categoryButton] + toolbarButtons : toolbarButtons
         let leftCount = controls.count - 2
-        let widths = controls.map { ceil(Theme.textWidth($0.title, font: $0.font!)) + 24 }
+        let widths = controls.map { ceil(Theme.textWidth($0.title, font: $0.font!)) + 32 }
         let available = max(0, bounds.width - 36 - CGFloat(controls.count - 1) * 4)
         let fitting = min(1, available / widths.reduce(0, +))
         var left: CGFloat = 18
@@ -194,9 +201,19 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         let visibleCount = Self.names.count + (additionalTitle == nil ? 0 : 1)
         let available = max(0, bounds.width - 36 - rightInset - CGFloat(visibleCount - 1) * 2)
         let natural = buttonWidths.prefix(visibleCount).reduce(0, +)
-        let reduction = max(0, (natural - available) / CGFloat(visibleCount))
+        // A native menu keeps every type reachable instead of crushing the labels.
+        let overflow = natural > available
+        for (index, button) in buttons.enumerated() {
+            button.isHidden = overflow || (index == Self.names.count && additionalTitle == nil)
+        }
+        capsule.isHidden = overflow
+        categoryButton.isHidden = !overflow
+        if overflow {
+            categoryButton.frame = NSRect(x: 18, y: y, width: min(available, Theme.textWidth(categoryButton.title, font: categoryButton.font!) + 32), height: 26)
+            return
+        }
         for (i, button) in buttons.prefix(visibleCount).enumerated() {
-            let width = max(20, buttonWidths[i] - reduction)
+            let width = buttonWidths[i]
             button.frame = NSRect(x: x, y: y, width: width, height: 26)
             x += width + 2
         }

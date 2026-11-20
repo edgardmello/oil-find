@@ -25,7 +25,9 @@ final class MultipleSelectionTests: XCTestCase {
         let results = controller.results
         let table = try XCTUnwrap(results.subviews.compactMap { $0 as? NSScrollView }.first?.documentView as? NSTableView)
         XCTAssertTrue(table.allowsMultipleSelection)
-        XCTAssertTrue(table.draggingSourceOperationMask(forLocal: false).contains(.move))
+        // draggingSourceOperationMask(forLocal:) is unavailable in recent SDKs;
+        // a pasteboard writer with file URLs is what lets Finder treat the drag as a move.
+        XCTAssertNotNil(table.dataSource?.tableView?(table, pasteboardWriterForRow: 0))
 
         XCTAssertTrue(controller.handleKey(key(125, .shift)))
         XCTAssertTrue(controller.handleKey(key(125, .shift)))

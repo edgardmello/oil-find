@@ -104,9 +104,16 @@ final class SeparatorView: NSView {
 
 // Native buttons retain keyboard and accessibility behavior while drawing the specified chrome.
 class ChromeButton: NSButton {
-    enum Style { case filter, plain, primary }
+    enum Style { case filter, plain, primary, toolbar }
     let chromeStyle: Style
-    var active = false { didSet { if active != oldValue { updateFilterText(); needsDisplay = true } } }
+    var active = false {
+        didSet {
+            if active != oldValue {
+                setAccessibilityValue(active ? 1 : 0)
+                updateFilterText(); needsDisplay = true
+            }
+        }
+    }
     var hovered = false { didSet { normalLabel.textColor = hovered ? .labelColor : .secondaryLabelColor; needsDisplay = true } }
     var onPress: (() -> Void)?
     override var title: String {
@@ -170,18 +177,33 @@ class ChromeButton: NSButton {
             let fill = pressed ? accent.blended(withFraction: 0.08, of: .black)! : hovered ? accent.blended(withFraction: 0.06, of: .white)! : accent
             fill.setFill(); NSBezierPath(roundedRect: bounds, xRadius: 9, yRadius: 9).fill()
             color = .white
+        case .toolbar:
+            let fill = active ? NSColor.controlAccentColor.withAlphaComponent(0.12)
+                : NSColor.labelColor.withAlphaComponent(pressed ? 0.10 : hovered ? 0.07 : 0.035)
+            fill.setFill()
+            NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 7, yRadius: 7).fill()
         case .plain: break
         }
         let textSize = (title as NSString).size(withAttributes: [.font: font!])
         let extra: CGFloat = trailingSymbol == nil ? 0 : 16
-        let x = (bounds.width - textSize.width - extra) / 2
+        let padding: CGFloat = chromeStyle == .plain ? 12 : 16
+        let textWidth = min(ceil(textSize.width), max(0, bounds.width - padding - extra))
+        let x = (bounds.width - textWidth - extra) / 2
         color = textTint ?? color
-        (title as NSString).draw(at: NSPoint(x: x, y: (bounds.height - textSize.height) / 2), withAttributes: [.font: font!, .foregroundColor: isEnabled ? color : color.withAlphaComponent(0.4)])
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        paragraph.alignment = .center
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: bounds).addClip()
+        (title as NSString).draw(in: NSRect(x: x, y: (bounds.height - textSize.height) / 2, width: textWidth, height: textSize.height),
+                                withAttributes: [.font: font!, .paragraphStyle: paragraph,
+                                                 .foregroundColor: isEnabled ? color : color.withAlphaComponent(0.4)])
         if let trailingSymbol {
-            let rect = NSRect(x: x + textSize.width + 6, y: (bounds.height - 10) / 2, width: 10, height: 10)
+            let rect = NSRect(x: x + textWidth + 6, y: (bounds.height - 10) / 2, width: 10, height: 10)
             let tinted = trailingSymbol.copy() as! NSImage
             tinted.lockFocus(); color.set(); NSRect(origin: .zero, size: tinted.size).fill(using: .sourceAtop); tinted.unlockFocus()
             tinted.draw(in: rect)
         }
+        NSGraphicsContext.restoreGraphicsState()
     }
 }

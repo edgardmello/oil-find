@@ -220,18 +220,12 @@ public final class ContentIndexDatabase {
                 _ = ftsExpr.withCString { sqlite3_bind_text(stmt, 1, $0, -1, transient) }
                 sqlite3_bind_int(stmt, 2, Int32(max(limit * 4, 400)))
             }
-        } else if let anchor = clauses.first?.first?.text, !anchor.isEmpty {
-            let sql = """
-                SELECT path, mtime, size, body
-                FROM files
-                WHERE instr(lower(body), lower(?1)) > 0
-                ORDER BY mtime DESC
-                LIMIT ?2;
-                """
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
-                _ = anchor.withCString { sqlite3_bind_text(stmt, 1, $0, -1, transient) }
-                sqlite3_bind_int(stmt, 2, Int32(max(limit * 4, 400)))
-            }
+        } else {
+            // Short and Unicode alternatives cannot use the trigram index. Verify all bodies
+            // with the same matcher instead of anchoring to only the first OR alternative.
+            // Walk rowids without sorting all stored bodies before the first cancellation check.
+            let sql = "SELECT path, mtime, size, body FROM files;"
+            _ = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)
         }
 
         guard let activeStmt = stmt else { return [] }

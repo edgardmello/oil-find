@@ -11,9 +11,8 @@ final class M9Tests: XCTestCase {
         XCTAssertLessThan(Theme.Motion.panelOut, panel.duration)
     }
     func testT91ToastText() {
-        for (kind, zh, en) in [(ToastKind.copiedPath, "已拷贝：", "Copied: "), (.copiedName, "已拷贝名称：", "Copied name: "), (.trashed, "已移到废纸篓：", "Moved to Trash: ")] {
-            XCTAssertEqual(Presentation.toastText(kind, value: "/Users/me/文档.pdf", chinese: true), zh + "/Users/me/文档.pdf")
-            XCTAssertEqual(Presentation.toastText(kind, value: "/Users/me/文档.pdf", chinese: false), en + "/Users/me/文档.pdf")
+        for (kind, prefix) in [(ToastKind.copiedPath, "Copied: "), (.copiedName, "Copied name: "), (.trashed, "Moved to Trash: ")] {
+            XCTAssertEqual(Presentation.toastText(kind, value: "/Users/me/文档.pdf"), prefix + "/Users/me/文档.pdf")
         }
     }
     func testT92WelcomeState() {

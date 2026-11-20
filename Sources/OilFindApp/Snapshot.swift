@@ -9,7 +9,7 @@ enum SnapshotError: Error, CustomStringConvertible {
 #if DEBUG
 enum Snapshot {
     static func run(_ arguments: [String], appExtension: ApplicationExtension? = nil, externalDrives: ExternalDriveCatalog = ExternalDriveCatalog()) throws {
-        let allowed = Set(["--snapshot", "--state", "--query", "--filter", "--sort", "--select", "--appearance", "--db", "--settings-scroll", "--settings-page", "--language", "--coverage", "--update-notes", "--update-scroll", "--topic-index"])
+        let allowed = Set(["--snapshot", "--state", "--query", "--filter", "--sort", "--select", "--appearance", "--db", "--settings-scroll", "--settings-page", "--coverage", "--update-notes", "--update-scroll", "--topic-index"])
         var values: [String: String] = [:], i = 0, granted = false, inlinePreview = false, compactTable = false
         while i < arguments.count {
             if arguments[i] == "--compact-table" { compactTable = true; i += 1; continue }
@@ -19,12 +19,6 @@ enum Snapshot {
             values[arguments[i]] = arguments[i + 1]; i += 2
         }
         guard let output = values["--snapshot"], !output.isEmpty else { throw SnapshotError.failed("--snapshot requires an output path") }
-        if let language = values["--language"] {
-            guard ["zh", "en"].contains(language) else { throw SnapshotError.failed("Invalid language: \(language)") }
-            L10n.snapshotChinese = language == "zh"
-        }
-        defer { L10n.snapshotChinese = nil }
-        appExtension?.languageDidChange(chinese: L10n.chinese)
         let state = values["--state"] ?? "results"
         guard ["classic", "search-bar-expanded", "search-bar", "results", "stash", "recent", "empty", "indexing", "welcome", "toast", "settings", "menu", "no-access", "diagnostic", "syntax", "update-available", "update-downloading", "update-failed", "update-latest"].contains(state) else { throw SnapshotError.failed("Invalid state: \(state)") }
         let appearance = values["--appearance"] ?? "light"
@@ -68,11 +62,11 @@ enum Snapshot {
             return
         }
         if state.hasPrefix("update-") {
-            var manifest = try UpdateManifest.parse(Data(#"{"version":"1.2.0","build":5,"url":"https://find.oiloil.org/downloads/Oil-Find-1.2.0.zip","size":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","minimumSystemVersion":"14.0","published":"2026-10-04","notes":{"zh":["应用内检查更新：有新版本时提示，一键下载、校验并重启到新版本。","官网新增更新日志。"],"en":["Built-in updates: Oil Find tells you when a new version is out, then downloads, verifies and restarts into it.","A changelog is now on the website."]}}"#.utf8))
+            var manifest = try UpdateManifest.parse(Data(#"{"version":"1.2.0","build":5,"url":"https://find.oiloil.org/downloads/Oil-Find-1.2.0.zip","size":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","minimumSystemVersion":"14.0","published":"2026-10-04","notes":["Built-in updates: Oil Find tells you when a new version is out, then downloads, verifies and restarts into it.","A changelog is now on the website."]}"#.utf8))
             if let text = values["--update-notes"] {
                 guard let count = Int(text), (1...20).contains(count) else { throw SnapshotError.failed("Invalid update note count") }
                 var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(manifest)) as! [String: Any]
-                object["notes"] = ["zh": (0..<count).map { manifest.notes.zh[$0 % 2] }, "en": (0..<count).map { manifest.notes.en[$0 % 2] }]
+                object["notes"] = (0..<count).map { manifest.notes[$0 % 2] }
                 manifest = try UpdateManifest.parse(JSONSerialization.data(withJSONObject: object))
             }
             let model = UpdateManager(snapshot: true, current: state == "update-latest" ? UpdateManager.current : UpdateVersion("1.1.0", build: 4)!)

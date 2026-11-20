@@ -42,14 +42,13 @@ public protocol ApplicationExtension: AnyObject {
     func prepareArguments(_ arguments: inout [String]) throws
     #endif
     func attachExternalDrives(_ catalog: ExternalDriveCatalogReading)
-    func start(chinese: Bool, showSettings: @escaping () -> Void)
+    func start(showSettings: @escaping () -> Void)
     func searchSources() -> [SearchSource]
     var supplementarySearchProvider: SupplementarySearchProvider? { get }
     var onSearchSourcesChange: (() -> Void)? { get set }
     var settingsMenuItem: ApplicationMenuItem? { get }
     var onSettingsMenuItemChange: (() -> Void)? { get set }
     func stop()
-    func languageDidChange(chinese: Bool)
     func handle(_ url: URL)
     func settingsSection(window: @escaping () -> NSWindow?) -> AnyView
 }

@@ -4,12 +4,8 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-# Every update must satisfy the preceding release's certificate requirement.
-if ! security find-identity -v -p codesigning | grep -q '"Oil Find Self-Signed"'; then
-    printf '%s\n' 'Packaging requires the existing "Oil Find Self-Signed" identity.' >&2
-    exit 1
-fi
-unset OILFIND_SIGN_IDENTITY
+# Personal packages use the same stable identity as production installation.
+export OILFIND_REQUIRE_STABLE_SIGNING=1
 "$PROJECT_DIR/scripts/build-app.sh"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
 ARCHIVE_PATH="$PROJECT_DIR/build/Oil-Find-$VERSION.zip"

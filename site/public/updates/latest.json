@@ -6,12 +6,7 @@
   "sha256": "6287c45b727163080f5a9d9395db910e0d1930b5c2da854a1b479b074cbd9f9b",
   "minimumSystemVersion": "14.0",
   "published": "2026-10-17",
-  "notes": {
-    "zh": [
-      "修复了 1.7.0 在部分电脑上启动直接退出、自动更新失败的问题。AI 话题图标现在会从安装包内正确读取；即使缺少图标，也不会导致应用崩溃。"
-    ],
-    "en": [
-      "Fixed an issue in 1.7.0 where Oil Find would quit unexpectedly on launch and cause automatic updates to fail on some Macs. AI conversation icons now load correctly from within the app bundle, and missing icons will no longer crash the app."
-    ]
-  }
+  "notes": [
+    "Fixed an issue in 1.7.0 where Oil Find would quit unexpectedly on launch and cause automatic updates to fail on some Macs. AI conversation icons now load correctly from within the app bundle, and missing icons will no longer crash the app."
+  ]
 }

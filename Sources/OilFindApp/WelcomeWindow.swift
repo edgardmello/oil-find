@@ -111,7 +111,6 @@ private struct WelcomeStartButton: NSViewRepresentable {
 final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
     let model: WelcomeModel
     private var flagsMonitor: Any?
-    private var languageObserver: NSObjectProtocol?
     private var finishing = false
     init(granted: Bool, snapshot: Bool = false) {
         model = WelcomeModel(granted: granted, snapshot: snapshot)
@@ -123,10 +122,6 @@ final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
         hosting.safeAreaRegions = []
         window.contentViewController = hosting
         model.onContentChange = { [weak self] in self?.resizeToContent() }
-        languageObserver = NotificationCenter.default.addObserver(forName: L10n.changed, object: nil, queue: .main) { [weak self] _ in
-            self?.model.objectWillChange.send()
-            DispatchQueue.main.async { [weak self] in self?.resizeToContent() }
-        }
         resizeToContent()
         if !snapshot {
             flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
@@ -168,6 +163,5 @@ final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
     func windowDidBecomeKey(_ notification: Notification) { model.held = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask) }
     deinit {
         if let flagsMonitor { NSEvent.removeMonitor(flagsMonitor) }
-        if let languageObserver { NotificationCenter.default.removeObserver(languageObserver) }
     }
 }

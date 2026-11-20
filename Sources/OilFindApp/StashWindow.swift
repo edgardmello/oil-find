@@ -79,11 +79,6 @@ final class StashWindow: NSWindowController, NSTableViewDataSource, NSTableViewD
                 self.refresh()
             }))
         }
-        let center = NotificationCenter.default
-        observers.append((center, center.addObserver(forName: L10n.changed, object: nil, queue: .main) { [weak self] _ in
-            self?.localize()
-            self?.table.reloadData()
-        }))
         localize()
     }
 

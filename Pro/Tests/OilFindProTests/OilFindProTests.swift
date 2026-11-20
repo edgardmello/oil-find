@@ -50,7 +50,7 @@ final class OilFindProTests: XCTestCase {
         let source = SearchSource(id: "startup", displayName: "", isOnline: true, store: store)
 
         // 1. Search for content inside nested Swift file where filename does NOT match query.
-        let query1 = Query.parse("computeQuantumFluxValue", store: store)
+        let query1 = Query.parse("[computeQuantumFluxValue]", store: store)
         let work1 = manager.prepareSearch(query1, options: SearchOptions(), sources: [source], isCancelled: { false })
         let hits1 = work1()
         XCTAssertEqual(hits1.count, 1)
@@ -60,7 +60,7 @@ final class OilFindProTests: XCTestCase {
         XCTAssertFalse(hits1[0].highlights.isEmpty)
 
         // 2. Search with extension filter + content term.
-        let query2 = Query.parse("ext:md hyperdrive calibration", store: store)
+        let query2 = Query.parse("ext:md [\"hyperdrive calibration\"]", store: store)
         let work2 = manager.prepareSearch(query2, options: SearchOptions(), sources: [source], isCancelled: { false })
         let hits2 = work2()
         XCTAssertEqual(hits2.count, 1)
@@ -73,7 +73,7 @@ final class OilFindProTests: XCTestCase {
         XCTAssertEqual(explicitHits.map(\.entryID), [matchedID2])
 
         // 3. Extension mismatch should filter out the file.
-        let query3 = Query.parse("ext:py computeQuantumFluxValue", store: store)
+        let query3 = Query.parse("ext:py [computeQuantumFluxValue]", store: store)
         let work3 = manager.prepareSearch(query3, options: SearchOptions(), sources: [source], isCancelled: { false })
         XCTAssertTrue(work3().isEmpty)
     }
@@ -198,7 +198,7 @@ final class OilFindProTests: XCTestCase {
         let manager = ContentSearchManager()
         defer { manager.stop() }
         let source = SearchSource(id: "startup", displayName: "", isOnline: true, store: store)
-        let query = Query.parse("supracitado", store: store)
+        let query = Query.parse("[supracitado]", store: store)
         let started = CFAbsoluteTimeGetCurrent()
         let hits = manager.prepareSearch(query, options: SearchOptions(), sources: [source], isCancelled: { false })()
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - started) * 1000

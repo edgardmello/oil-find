@@ -218,7 +218,7 @@ final class FooterBar: FlippedView {
     func showToast(_ kind: ToastKind, value: String, snapshot: Bool = false) {
         toastContent = (kind, value)
         toastTimer?.invalidate()
-        toast.stringValue = Presentation.toastText(kind, value: value, chinese: L10n.chinese)
+        toast.stringValue = Presentation.toastText(kind, value: value)
         let wasVisible = (toast.layer?.presentation()?.opacity ?? Float(toast.alphaValue)) > 0
         Theme.Motion.opacity(status, to: 0, using: snapshot ? nil : Theme.Motion.basic(Theme.Motion.toastIn))
         Theme.Motion.opacity(toast, to: 1, using: snapshot ? nil : Theme.Motion.basic(Theme.Motion.toastIn))
@@ -252,7 +252,7 @@ final class FooterBar: FlippedView {
         classicReveal.localize(L10n.text("hint.reveal"))
         classicCopy.localize(L10n.text(fileActions ? "hint.copy" : "hint.copyResult"))
         syntax.localize(L10n.text("hint.syntax")); settings.localize()
-        if let (kind, value) = toastContent { toast.stringValue = Presentation.toastText(kind, value: value, chinese: L10n.chinese) }
+        if let (kind, value) = toastContent { toast.stringValue = Presentation.toastText(kind, value: value) }
         needsLayout = true
     }
     deinit { toastTimer?.invalidate() }
@@ -299,8 +299,15 @@ final class FooterBar: FlippedView {
             if classicLayout { candidates.append(classicCopy) }
         }
         if !hiddenStatusItems.contains(.syntax) { candidates.append(syntax) }
-        let hintWidth = candidates.reduce(0) { $0 + $1.desiredWidth + 8 }
-        let visibleHints = right - hintWidth >= 175 ? candidates : []
+        // Preserve the most useful shortcuts as space narrows.
+        var visibleHints: [KeyHint] = []
+        var hintWidth: CGFloat = 0
+        for hint in candidates {
+            let width = hint.desiredWidth + 10
+            guard right - hintWidth - width >= 175 else { break }
+            visibleHints.append(hint)
+            hintWidth += width
+        }
         for hint in hints + [syntax, classicReveal, classicCopy] { hint.isHidden = !visibleHints.contains(hint) }
         var x = right - visibleHints.reduce(0) { $0 + $1.desiredWidth + 10 }
         status.frame = NSRect(x: 22, y: 9, width: max(0, x - 38), height: 16)

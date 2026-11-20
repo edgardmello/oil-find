@@ -52,6 +52,8 @@ final class ResultCell: NSTableCellView {
     override func layout() {
         super.layout()
         if compact {
+            dateLabel.isHidden = false
+            sizeLabel.isHidden = false
             icon.frame = NSRect(x: 14, y: 4, width: 16, height: 16)
             var x = CompactFileTable.iconWidth
             for (label, width) in zip([nameLabel, pathLabel, sizeLabel, dateLabel], CompactFileTable.widths(for: bounds.width)) {
@@ -61,14 +63,18 @@ final class ResultCell: NSTableCellView {
             return
         }
         icon.frame = NSRect(x: 26, y: 9, width: 32, height: 32)
-        let width = max(0, bounds.width - 236)
+        // Keep names readable in the narrower list beside the inspector.
+        let showsMetadata = bounds.width >= 560 * textScale
+        dateLabel.isHidden = !showsMetadata
+        sizeLabel.isHidden = !showsMetadata
+        let width = max(0, bounds.width - (showsMetadata ? 236 : 96))
         nameLabel.frame = NSRect(x: 70, y: 8, width: width, height: 18 * textScale)
         if detailLabel.isHidden {
             detailLabel.frame = .zero
             pathLabel.frame = NSRect(x: 70, y: 27 * textScale, width: width, height: 15 * textScale)
         } else {
             let fullDetailWidth = ceil(detailLabel.attributedStringValue.size().width)
-            let maxDetail = max(100, width * 0.62)
+            let maxDetail = max(0, width * 0.62)
             let detailWidth = min(fullDetailWidth, maxDetail)
             let spacing: CGFloat = 6
             detailLabel.frame = NSRect(x: 70, y: 27 * textScale, width: detailWidth, height: 15 * textScale)
@@ -135,7 +141,7 @@ final class ResultCell: NSTableCellView {
             }
             detailLabel.attributedStringValue = text
         }
-        dateLabel.stringValue = compact ? CompactFileTable.date(item.modified) : Presentation.dateText(item.modified, now: Date(), calendar: .current, chinese: L10n.chinese)
+        dateLabel.stringValue = compact ? CompactFileTable.date(item.modified) : Presentation.dateText(item.modified, now: Date(), calendar: .current)
         sizeLabel.stringValue = item.kind == 2 ? L10n.text("meta.app") : item.flags & SiftFlag.dir != 0 && item.flags & SiftFlag.package == 0 ? L10n.text("meta.folder") : Presentation.sizeText(item.size)
         toolTip = item.detail.map { "\(item.path)\n\n\($0.presentation.text)" } ?? item.path
         icon.image = icons.icon(name: item.name, path: item.path, flags: item.flags, kind: item.kind, resolveFileIcon: item.source.isOnline) { [weak self] image in
@@ -164,7 +170,7 @@ final class ResultCell: NSTableCellView {
         nameLabel.attributedStringValue = highlighted(item.title, font: nameLabel.font!, color: .labelColor)
         detailLabel.isHidden = true; detailLabel.stringValue = ""
         pathLabel.attributedStringValue = highlighted(item.detail, font: pathLabel.font!, color: .secondaryLabelColor)
-        dateLabel.stringValue = compact ? CompactFileTable.date(item.modified) : Presentation.dateText(item.modified, now: Date(), calendar: .current, chinese: L10n.chinese)
+        dateLabel.stringValue = compact ? CompactFileTable.date(item.modified) : Presentation.dateText(item.modified, now: Date(), calendar: .current)
         sizeLabel.stringValue = item.location; sizeLabel.lineBreakMode = .byTruncatingMiddle
         icon.image = item.icon; toolTip = item.location + "\n" + item.detail; needsLayout = true
     }

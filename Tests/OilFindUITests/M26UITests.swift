@@ -226,11 +226,6 @@ extension M26UITests {
         XCTAssertTrue(window.makeFirstResponder(nil))
         XCTAssertEqual(field.stringValue, "log js css inc")
         XCTAssertEqual(defaults.stringArray(forKey: "excludedExtensions"), ["log", "js", "css", "inc"])
-        let old = L10n.snapshotChinese; defer { L10n.snapshotChinese = old }
-        L10n.snapshotChinese = true
-        XCTAssertEqual(L10n.explanation(.fileType("log")), "它的扩展名（.log）在「排除的文件类型」里。")
-        XCTAssertEqual(L10n.text("coverage.fileType", "3"), "排除的文件类型：3 个")
-        L10n.snapshotChinese = false
         XCTAssertEqual(L10n.explanation(.fileType("log")), "Its extension (.log) is in Excluded File Types.")
         XCTAssertEqual(L10n.text("coverage.fileType", "3"), "Excluded file types: 3")
     }

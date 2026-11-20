@@ -9,7 +9,6 @@ public final class OilFindProExtension: ApplicationExtension {
     public var onSearchSourcesChange: (() -> Void)?
     public var onSettingsMenuItemChange: (() -> Void)?
 
-    private var chinese = false
     private var showSettingsAction: (() -> Void)?
     private var driveCatalog: ExternalDriveCatalogReading?
     private var driveSubscription: AnyCancellable?
@@ -84,10 +83,8 @@ public final class OilFindProExtension: ApplicationExtension {
         }
     }
 
-    public func start(chinese: Bool, showSettings: @escaping () -> Void) {
-        self.chinese = chinese
+    public func start(showSettings: @escaping () -> Void) {
         self.showSettingsAction = showSettings
-        contentManager.setLanguage(chinese: chinese)
         syncOfflineDrives()
     }
 
@@ -123,34 +120,24 @@ public final class OilFindProExtension: ApplicationExtension {
         contentManager.stop()
     }
 
-    public func languageDidChange(chinese: Bool) {
-        self.chinese = chinese
-        contentManager.setLanguage(chinese: chinese)
-        onSettingsMenuItemChange?()
-    }
-
     public func handle(_ url: URL) {
         showSettingsAction?()
     }
 
     public func settingsSection(window: @escaping () -> NSWindow?) -> AnyView {
-        AnyView(ContentSearchSettingsSection(manager: contentManager, chinese: chinese))
+        AnyView(ContentSearchSettingsSection(manager: contentManager))
     }
 }
 
 private struct ContentSearchSettingsSection: View {
     @ObservedObject var manager: ContentSearchManager
-    let chinese: Bool
 
     private var isPortuguese: Bool {
-        guard !chinese else { return false }
-        return (Locale.preferredLanguages.first?.lowercased() ?? "").hasPrefix("pt")
+        (Locale.preferredLanguages.first?.lowercased() ?? "").hasPrefix("pt")
     }
 
-    private func tr(zh: String, pt: String, en: String) -> String {
-        if chinese { return zh }
-        if isPortuguese { return pt }
-        return en
+    private func tr(_ pt: String, _ en: String) -> String {
+        isPortuguese ? pt : en
     }
 
     var body: some View {
@@ -158,19 +145,12 @@ private struct ContentSearchSettingsSection: View {
             VStack(alignment: .leading, spacing: 5) {
                 Toggle(
                     tr(
-                        zh: "搜索文件内容（递归）",
-                        pt: "Buscar recursivamente dentro dos arquivos",
-                        en: "Search Inside File Contents (Recursive)"
+                        "Buscar recursivamente dentro dos arquivos",
+                        "Search Inside File Contents (Recursive)"
                     ),
                     isOn: Binding(get: { manager.enabled }, set: manager.setEnabled)
                 )
-                Text(
-                    tr(
-                        zh: "在文件名搜索的同时，实时检索代码、文本、PDF 与文档内部正文，全部在本机完成。",
-                        pt: "Pesquisa dentro de códigos, textos, Markdown, PDFs e documentos Office localmente em paralelo à busca por nome.",
-                        en: "Searches inside code, plain text, Markdown, PDFs and Office documents locally alongside filename search."
-                    )
-                )
+                Text(L10n.text("content.help"))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -178,29 +158,23 @@ private struct ContentSearchSettingsSection: View {
 
             Toggle(
                 tr(
-                    zh: "代码、纯文本与配置文件 (.swift, .py, .js, .md, .txt, .json…)",
-                    pt: "Código, texto puro e configurações (.swift, .py, .js, .md, .txt, .json…)",
-                    en: "Code, plain text and config files (.swift, .py, .js, .md, .txt, .json…)"
+                    "Código, texto puro e configurações (.swift, .py, .js, .md, .txt, .json…)",
+                    "Code, plain text and config files (.swift, .py, .js, .md, .txt, .json…)"
                 ),
                 isOn: Binding(get: { manager.codeAndTextEnabled }, set: manager.setCodeAndTextEnabled)
             )
             .disabled(!manager.enabled)
 
             Toggle(
-                tr(
-                    zh: "PDF、Office 与富文本文档 (.pdf, .docx, .pptx, .xlsx, .rtf…)",
-                    pt: "Documentos PDF, Office e RTF (.pdf, .docx, .pptx, .xlsx, .rtf…)",
-                    en: "PDF, Office and Rich Text documents (.pdf, .docx, .pptx, .xlsx, .rtf…)"
-                ),
+                L10n.text("content.documents"),
                 isOn: Binding(get: { manager.documentsEnabled }, set: manager.setDocumentsEnabled)
             )
             .disabled(!manager.enabled)
 
             Toggle(
                 tr(
-                    zh: "包含隐藏目录、包内部与依赖目录中的文件",
-                    pt: "Incluir arquivos em pastas ocultas, pacotes e dependências",
-                    en: "Include files inside hidden folders, packages and dependencies"
+                    "Incluir arquivos em pastas ocultas, pacotes e dependências",
+                    "Include files inside hidden folders, packages and dependencies"
                 ),
                 isOn: Binding(get: { manager.includeNoiseAndPackages }, set: manager.setIncludeNoiseAndPackages)
             )
@@ -210,9 +184,8 @@ private struct ContentSearchSettingsSection: View {
                 if manager.indexing {
                     Text(
                         tr(
-                            zh: "正在后台建立内容索引… 已索引 \(manager.indexedFileCount) 个文件",
-                            pt: "Indexando conteúdo em segundo plano… \(manager.indexedFileCount) arquivos",
-                            en: "Indexing file contents in background… \(manager.indexedFileCount) files"
+                            "Indexando conteúdo em segundo plano… \(manager.indexedFileCount) arquivos",
+                            "Indexing file contents in background… \(manager.indexedFileCount) files"
                         )
                     )
                     .font(.footnote)
@@ -221,9 +194,8 @@ private struct ContentSearchSettingsSection: View {
                     let sizeText = ByteCountFormatter.string(fromByteCount: manager.diskBytes, countStyle: .file)
                     Text(
                         tr(
-                            zh: "已缓存 \(manager.indexedFileCount) 个文件 · 占用 \(sizeText)",
-                            pt: "\(manager.indexedFileCount) arquivos indexados · \(sizeText)",
-                            en: "\(manager.indexedFileCount) files indexed · \(sizeText)"
+                            "\(manager.indexedFileCount) arquivos indexados · \(sizeText)",
+                            "\(manager.indexedFileCount) files indexed · \(sizeText)"
                         )
                     )
                     .font(.footnote)
@@ -231,13 +203,13 @@ private struct ContentSearchSettingsSection: View {
                 }
                 Spacer()
                 Button(
-                    tr(zh: "重建内容索引", pt: "Reindexar Conteúdo", en: "Rebuild Content Index"),
+                    tr("Reindexar Conteúdo", "Rebuild Content Index"),
                     action: manager.rebuildIndex
                 )
                 .disabled(!manager.enabled || manager.indexing)
             }
         } header: {
-            Text(tr(zh: "文件内容搜索", pt: "Busca no Conteúdo dos Arquivos", en: "File Content Search"))
+            Text(tr("Busca no Conteúdo dos Arquivos", "File Content Search"))
         }
     }
 }

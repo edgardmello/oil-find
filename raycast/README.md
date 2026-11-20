@@ -21,12 +21,16 @@ The extension uses, in order, the Oil Find App Path preference, an Oil Find that
 
 ## Local installation
 
+The app build does not install the extension. Run `./build.sh raycast` from the repository root to install the extension compatible with this checkout. It archives the previous installed extension under the ignored `.local-archive/raycast/` directory before replacing it.
+
 1. Build Oil Find from this checkout with `scripts/build-app.sh` and open `build/Oil Find.app` once so it builds its index. Or install a release that includes the Raycast bridge.
 2. In this folder run `npm ci`, then `npm run dev`. `ray develop` registers the extension with Raycast and rebuilds it on save. See [Raycast's guide](https://developers.raycast.com/basics/getting-started).
 3. In Raycast run **Search Files with Oil Find**. If it reports an outdated Oil Find, quit the old app or set **Oil Find App Path** to the new build.
 
-`ray build` and `ray develop` write to `~/.config/raycast/extensions`. Sandboxed tools that cannot write there fail with "operation not permitted"; run them from a normal terminal, or use `npm run build` to build into `dist/` only.
+`ray build` without `-o` and `ray develop` write to `~/.config/raycast/extensions`. Sandboxed tools that cannot write there fail with "operation not permitted"; run them from a normal terminal, or use `npm run build` (`ray build -e dist -o dist`) to build into `dist/` only.
 
 ## Limits
 
 The extension searches filenames and paths in the startup volume index. Content search and external drives stay in the Oil Find panel; Open Search in Oil Find (⇧⌘O) takes you there. Folders Oil Find has no access to, such as Downloads without Full Disk Access, are not in the index.
+
+If an older temporary build installed a different bridge protocol, rebuild the extension with `./build.sh raycast`. The extension and app must declare the same protocol version.

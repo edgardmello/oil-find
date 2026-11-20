@@ -21,6 +21,10 @@ jobs:
         run: swift build
       - name: Test Swift app
         run: swift test
+      - name: Check installation and uninstall scripts
+        run: |
+          python3 Tests/Scripts/test_install.py
+          python3 Tests/Scripts/test_uninstall.py
       - name: Check open core boundary
         run: python3 Tests/Scripts/test_open_core.py
       - name: Check packaged launch without developer resources

@@ -1,10 +1,10 @@
-用途：macOS 应用图标的主图形，之后会放到蓝色圆角方形底板上，最小显示到 32 像素。
-输入图片：图 1 是要修改的图，戴眼镜的小人和一个放大镜，背景透明。
-只改两处：
-1. 放大镜变大：镜片外圈直径约为头部直径的 60%，仍在人物右下方，压住脸的右下边缘；手柄相应变粗变长，朝右下 45 度伸出。镜片内部保持干净的白色，保留右上方那道弧形高光和左侧少量网点阴影。放大镜不遮住两只眼睛、眼镜和嘴。
-2. 人物背后左下方露出的那道月牙，从暖黄色改成浅天蓝色。
-保持不变：圆脸、两片圆眼镜和镜腿、两只眼睛、眉毛、微笑、头顶的头发、脸左侧的黑色网点阴影、下方脖子那一笔竖线、左侧三道速度线；粗黑手绘墨线的画风。全图只用黑、白和这一种浅天蓝色。
-构图：人物和放大镜作为一个整体居中，约占画面 80%，四周留白。
-背景：完全透明。
-画面里没有文字。
-避免：黄色、渐变、3D 质感、发光或光晕、新增任何其他元素、改变人物的五官。
+Purpose: the main artwork of the macOS app icon; it will later be placed on a blue rounded-square plate and must stay legible down to 32 pixels.
+Input image: image 1 is the artwork to edit — a small person wearing glasses and a magnifying glass, on a transparent background.
+Change only these two things:
+1. Make the magnifying glass bigger: the outer rim of the lens is about 60% of the head's diameter, still at the figure's lower right, overlapping the lower-right edge of the face; the handle gets proportionally thicker and longer, extending toward the lower right at 45 degrees. Keep the lens interior clean white, preserving the arc highlight in the upper right and the light halftone shading on the left. The magnifying glass must not cover either eye, the glasses, or the mouth.
+2. The crescent visible behind the figure at the lower left changes from warm yellow to light sky blue.
+Keep unchanged: the round face, the two round glasses and their temples, both eyes, the eyebrows, the smile, the hair on top of the head, the black halftone shading on the left side of the face, the single vertical stroke of the neck below, and the three speed lines on the left; keep the thick black hand-drawn ink line style. The whole image uses only black, white, and this light sky blue.
+Composition: the figure and the magnifying glass are centered as one group, covering about 80% of the canvas, with margins all around.
+Background: fully transparent.
+No text anywhere in the image.
+Avoid: yellow, gradients, 3D texture, glow or halo, adding any other elements, changing the figure's facial features.

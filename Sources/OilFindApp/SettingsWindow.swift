@@ -6,11 +6,8 @@ import Carbon
 import OilFindCore
 
 final class SettingsModel: ObservableObject {
-    @Published private(set) var language: AppLanguage
     @Published var launchAtLogin: Bool
     let topics: AITopicManager
-    private var languageObserver: NSObjectProtocol?
-    private let languageDefaults: UserDefaults
     private var coverageExplanation: CoverageExplanation?
     private let snapshot: Bool
     fileprivate let preferences: UserDefaults
@@ -54,7 +51,7 @@ final class SettingsModel: ObservableObject {
     private var keyMonitor: Any?
     private var timer: Timer?
 
-    init(snapshotStore: IndexStore? = nil, snapshot: Bool = false, languageDefaults: UserDefaults = .standard, preferences: UserDefaults = .standard, topics: AITopicManager? = nil) {
+    init(snapshotStore: IndexStore? = nil, snapshot: Bool = false, preferences: UserDefaults = .standard, topics: AITopicManager? = nil) {
         self.topics = topics ?? AITopicManager(defaults: preferences)
         self.snapshot = snapshot
         self.preferences = preferences
@@ -62,8 +59,6 @@ final class SettingsModel: ObservableObject {
         stashShortcuts = Dictionary(uniqueKeysWithValues: StashShortcut.allCases.map {
             ($0, snapshot ? $0.defaultChord : $0.chord(in: preferences))
         })
-        self.languageDefaults = languageDefaults
-        self.language = L10n.language
         launchAtLogin = snapshot ? false : SMAppService.mainApp.status == .enabled
         if !snapshot { SettingsPreferences.register() }
         let defaults = UserDefaults.standard
@@ -78,15 +73,6 @@ final class SettingsModel: ObservableObject {
         keyCode = snapshot ? Shortcut.defaultKeyCode : UInt32(clamping: defaults.integer(forKey: "hotKeyCode"))
         modifiers = snapshot ? Shortcut.defaultModifiers : UInt32(clamping: defaults.integer(forKey: "hotKeyModifiers"))
         self.snapshotStore = snapshotStore
-        languageObserver = NotificationCenter.default.addObserver(forName: L10n.changed, object: nil, queue: .main) { [weak self] _ in
-            guard let self else { return }
-            self.language = L10n.language
-            self.shortcutError = L10n.relocalized(self.shortcutError)
-            self.fileScriptError = L10n.relocalized(self.fileScriptError)
-            if let name = self.disconnectedDriveName { self.explanation = L10n.text("explain.disconnectedDrive", name) }
-            else if let answer = self.coverageExplanation { self.explanation = L10n.explanation(answer) }
-            self.onContentChange?()
-        }
         refresh()
     }
     func startRefreshing() {
@@ -167,7 +153,6 @@ final class SettingsModel: ObservableObject {
         pinyinEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "pinyinEnabled")
         onPinyinChange?()
     }
-    func setLanguage(_ value: AppLanguage) { L10n.setLanguage(value, in: languageDefaults) }
     func setScope(_ key: String, _ enabled: Bool) {
         switch key {
         case "indexDependencyDirs": indexDependencyDirs = enabled
@@ -295,34 +280,7 @@ final class SettingsModel: ObservableObject {
     }
     deinit {
         timer?.invalidate()
-        if let languageObserver { NotificationCenter.default.removeObserver(languageObserver) }
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
-    }
-}
-
-private struct LanguagePicker: NSViewRepresentable {
-    @ObservedObject var model: SettingsModel
-    final class Coordinator: NSObject {
-        let model: SettingsModel
-        init(_ model: SettingsModel) { self.model = model }
-        @objc func selected(_ button: NSPopUpButton) {
-            guard AppLanguage.allCases.indices.contains(button.indexOfSelectedItem) else { return }
-            model.setLanguage(AppLanguage.allCases[button.indexOfSelectedItem])
-        }
-    }
-    func makeCoordinator() -> Coordinator { Coordinator(model) }
-    func makeNSView(context: Context) -> NSPopUpButton {
-        let button = NSPopUpButton(frame: .zero, pullsDown: false)
-        button.controlSize = .small; button.font = .systemFont(ofSize: 12.5)
-        button.target = context.coordinator; button.action = #selector(Coordinator.selected(_:))
-        button.setAccessibilityIdentifier("settings.language")
-        return button
-    }
-    func updateNSView(_ button: NSPopUpButton, context: Context) {
-        let titles = AppLanguage.allCases.map(\.title)
-        if button.itemTitles != titles { button.removeAllItems(); button.addItems(withTitles: titles) }
-        button.selectItem(at: AppLanguage.allCases.firstIndex(of: model.language)!)
-        button.setAccessibilityLabel(L10n.text("settings.language"))
     }
 }
 
@@ -666,10 +624,6 @@ private struct SettingsForm: View {
         switch page {
         case .general:
             Section {
-                HStack {
-                    Text(L10n.text("settings.language")); Spacer()
-                    LanguagePicker(model: model).frame(width: 140, height: 24)
-                }
                 VStack(alignment: .leading, spacing: 5) {
                     Toggle(L10n.text("settings.login"), isOn: Binding(get: { model.launchAtLogin }, set: model.setLogin))
                     if let error = model.loginError { hint(error).foregroundStyle(.red) }
@@ -871,7 +825,7 @@ private struct SettingsForm: View {
                         Text(L10n.text("settings.items", Presentation.countText(model.indexedCount)))
                     }
                     if let date = model.scanDate {
-                        hint(L10n.text("settings.scanDate", Presentation.dateText(date, now: Date(), calendar: .current, chinese: L10n.chinese)))
+                        hint(L10n.text("settings.scanDate", Presentation.dateText(date, now: Date(), calendar: .current)))
                     }
                 }
                 VStack(alignment: .leading, spacing: 8) {
@@ -918,7 +872,7 @@ private struct SettingsForm: View {
               footer: { hint(L10n.text("settings.scopeHint")) }
         case .drives:
             Section {
-                ExternalDriveSettings(catalog: externalDrives, chinese: L10n.chinese, window: window)
+                ExternalDriveSettings(catalog: externalDrives, window: window)
             }
         case .topics:
             Section {

@@ -18,9 +18,6 @@ final class SearchSourcesUITests: XCTestCase {
         let external = try store(root.appendingPathComponent("T7 Shield"), name: "external.txt")
         let source = SearchSource(id: "external", displayName: "T7 Shield", isOnline: false, store: external)
         let controller = SearchViewController(snapshot: true)
-        let previousLanguage = L10n.snapshotChinese
-        L10n.snapshotChinese = true
-        defer { L10n.snapshotChinese = previousLanguage }
         try controller.prepareSnapshot(state: "results", query: "external", options: .init(), store: startup, selection: 0, additionalSources: [source])
         let item = try XCTUnwrap(controller.results.selectedItem)
         XCTAssertEqual(item.source.id, source.id)
@@ -36,7 +33,7 @@ final class SearchSourcesUITests: XCTestCase {
         let previewVisible = controller.quickLook.isVisible
         for event in [key(36), key(36, flags: .command), key(16, characters: "y", flags: .command)] {
             XCTAssertTrue(controller.handleKey(event))
-            XCTAssertEqual(controller.footer.text, "「T7 Shield」未连接，连接后才能打开。")
+            XCTAssertEqual(controller.footer.text, "“T7 Shield” is not connected. Connect it to open this file.")
             XCTAssertEqual(controller.quickLook.isVisible, previewVisible)
         }
         XCTAssertTrue(controller.handleKey(key(8, characters: "c", flags: .command)))
