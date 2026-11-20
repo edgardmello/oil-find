@@ -46,6 +46,15 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private lazy var fileStash = FileStash(preferences: preferences)
     private lazy var scriptWindow = FileScriptWindow()
     private let accessories = SearchAccessoryBar(frame: .zero)
+    private let tiles = FilterTileBar(frame: .zero)
+    private let titleBar = WindowTitleBar(frame: .zero)
+    private var chromeShowsWindow: Bool?
+    private lazy var fieldTools: [(FilterBar.ToolMenu, FieldToolButton)] = [
+        (.scope, FieldToolButton(symbol: "scope")), (.options, FieldToolButton(symbol: "asterisk")),
+        (.saved, FieldToolButton(symbol: "bookmark")), (.sort, FieldToolButton(symbol: "arrow.up.arrow.down")),
+        (.view, FieldToolButton(symbol: "sidebar.right"))
+    ]
+    private var windowChrome: Bool { searchInterface == .window }
     private var stashExpanded = false
     private var copyingStash = false
     private lazy var stashWindow = StashWindow(stash: fileStash, preferences: preferences)
@@ -135,7 +144,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private var sourceCaches: [String: SearchCache] = [:]
     private var sourceCacheStores: [String: ObjectIdentifier] = [:]
     private var folderScope: String?
-    private var activeLibraryFilter: QuickFilter?
+    private var activeLibraryFilter: QuickFilter? { didSet { tiles.activeID = activeLibraryFilter?.linkID } }
     private var savedCriteria: Query.SavedCriteria?
     private var volumeScope: String?
     private lazy var fuzzyNames = !snapshot && preferences.bool(forKey: "fuzzyNames")
@@ -187,7 +196,19 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     override func loadView() { view = PanelSurface(snapshot: snapshot) }
     override func viewDidLoad() {
         super.viewDidLoad()
-        [topLine, filters, results, empty, indexing, bottomLine, footer, inlinePreview, accessories, syntaxScroll].forEach(panelBody.addSubview)
+        [topLine, filters, results, empty, indexing, bottomLine, footer, inlinePreview, accessories, syntaxScroll, tiles].forEach(panelBody.addSubview)
+        tiles.onSelect = { [weak self] filter in self?.toggleLibraryFilter(filter) }
+        panelBody.addSubview(titleBar)
+        titleBar.onClose = { [weak self] in self?.hidePanel?() }
+        titleBar.onMinimize = { [weak self] in self?.hidePanel?() }
+        titleBar.onZoom = { [weak self] in self?.toggleInlinePreview() }
+        titleBar.onPin = { [weak self] in self?.togglePin() }
+        titleBar.onQuit = { NSApp.terminate(nil) }
+        for (tool, button) in fieldTools {
+            button.onPress = { [weak self] anchor in self?.filters.popUp(tool, from: anchor) }
+        }
+        searchField.trailingTools = fieldTools.map { $0.1 }
+        filters.onToolStateChange = { [weak self] in self?.refreshFieldTools() }
         view.addSubview(panelBody)
         view.addSubview(searchField)
         syntaxScroll.drawsBackground = false
@@ -199,7 +220,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         syntax.shortcutPreferences = preferences
         accessories.configureStashControls(preferences: preferences) { [weak self] in self?.clearStash() }
         refreshShortcuts()
-        if !snapshot { refreshStyle() }
+        if !snapshot { refreshStyle() } else { applyResultsLayout(); applyInterfaceChrome() }
         searchField.onExpand = { [weak self] in self?.expandSearchBar() }
         syntax.onExample = { [weak self] example in
             guard let self else { return }; self.setBrowsing(false); self.searchField.text = example; self.toggleSyntax(false); self.searchField.focus(); self.startSearch()
@@ -294,7 +315,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private func localize() {
         footer.spacePreview = spaceOpensQuickLook
         filters.localize(); footer.localize(); empty.localize(); indexing.localize(); syntax.localize(); results.localize()
-        searchField.localize(); inlinePreview.localize()
+        searchField.localize(); inlinePreview.localize(); titleBar.localize(); tiles.localize()
         refreshAccessories()
         refreshAdditionalFilter()
         if let result = results.result { updateFooter(result) }
@@ -311,6 +332,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             return
         }
         panelBody.frame = view.bounds
+        if windowChrome { layoutWindowChrome(w: w, h: h); return }
+        [topLine, bottomLine].forEach { $0.isHidden = false }
         searchField.frame = NSRect(x: 0, y: 0, width: w, height: 64)
         topLine.frame = NSRect(x: 0, y: 64, width: w, height: px)
         filters.frame = NSRect(x: 0, y: 64 + px, width: w, height: filters.preferredHeight)
@@ -331,6 +354,101 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         bottomLine.frame = NSRect(x: 0, y: h - footerHeight - px, width: w, height: px)
         footer.frame = NSRect(x: 0, y: h - footerHeight, width: w, height: footerHeight)
     }
+    /// Search Window: a boxed field, results and preview as cards, filter tiles above the status bar.
+    private func layoutWindowChrome(w: CGFloat, h: CGFloat) {
+        [topLine, bottomLine].forEach { $0.isHidden = true }
+        let header = WindowTitleBar.height + 50
+        titleBar.frame = NSRect(x: 0, y: 0, width: w, height: WindowTitleBar.height)
+        searchField.frame = NSRect(x: 0, y: WindowTitleBar.height - 2, width: w, height: 52)
+        filters.frame = NSRect(x: 0, y: header, width: w, height: 0)
+        let previewWidth = inlinePreviewVisible && !syntaxVisible ? min(340, floor(w * 0.3)) : 0
+        let accessoryHeight = syntaxVisible ? 0 : accessories.desiredHeight
+        accessories.isHidden = syntaxVisible || accessoryHeight == 0
+        // The stash card shares the left column with the results; the preview runs the full height beside both.
+        accessories.frame = NSRect(x: 0, y: header, width: w - previewWidth, height: accessoryHeight)
+        let top = header + accessoryHeight
+        let footerHeight = footer.desiredHeight
+        let tilesHeight = FilterTileBar.height
+        let region = NSRect(x: 0, y: top, width: w, height: max(0, h - top - footerHeight - tilesHeight - 4))
+        let list = NSRect(x: 0, y: top, width: w - previewWidth, height: region.height)
+        [results, empty, indexing].forEach { $0.frame = list }
+        syntaxScroll.frame = region
+        syntax.frame = NSRect(origin: .zero, size: NSSize(width: syntaxScroll.contentSize.width,
+                                                           height: max(region.height, syntax.contentHeight)))
+        inlinePreview.frame = previewWidth > 0
+            ? NSRect(x: list.maxX - 6, y: header + 4, width: previewWidth - 10, height: max(0, region.maxY - header - 8)) : .zero
+        tiles.frame = NSRect(x: 0, y: region.maxY + 4, width: w, height: tilesHeight)
+        footer.frame = NSRect(x: 0, y: h - footerHeight, width: w, height: footerHeight)
+    }
+
+    private func applyInterfaceChrome() {
+        let window = windowChrome
+        filters.tileMode = window
+        searchField.boxed = window
+        inlinePreview.card = window
+        tiles.isHidden = !window
+        titleBar.isHidden = !window
+        titleBar.pinned = preferences.bool(forKey: "keepPanelOpenOnDefocus")
+        (view as? PanelSurface)?.deep = window
+        // Like Cling's shelf, the stash shows above the results whenever it holds files.
+        if window && chromeShowsWindow != true { stashExpanded = true; refreshAccessories() }
+        chromeShowsWindow = window
+        if window { refreshTiles() }
+        refreshFieldTools()
+        view.needsLayout = true
+    }
+
+    /// Pin keeps the panel open when another app takes focus, the same as the General setting.
+    private func togglePin() {
+        let pinned = !preferences.bool(forKey: "keepPanelOpenOnDefocus")
+        if !snapshot { preferences.set(pinned, forKey: "keepPanelOpenOnDefocus") }
+        titleBar.pinned = pinned
+    }
+
+    private func refreshTiles() {
+        let taken = Set(StashShortcut.allCases.map { shortcut -> String in
+            let chord = shortcut.chord(in: preferences)
+            let flags = HotKey.modifierFlags(chord.modifiers).intersection([.command, .control, .option, .shift])
+            return String(flags.rawValue) + ":" + Shortcut.keyEquivalent(chord.keyCode).lowercased()
+        })
+        tiles.setFilters(QuickFilter.library(in: preferences)) { key, flags in
+            taken.contains(String(flags.rawValue) + ":" + String(key))
+        }
+    }
+
+    private func refreshFieldTools() {
+        for (tool, button) in fieldTools {
+            switch tool {
+            case .scope:
+                button.active = filters.scopeActive
+                button.toolTip = L10n.text("scope.menu")
+            case .options:
+                button.active = filters.searchOptionsActive
+                button.toolTip = L10n.text("scope.options")
+            case .saved:
+                button.active = activeLibraryFilter != nil
+                button.toolTip = L10n.text("scope.saved")
+            case .sort:
+                button.toolTip = L10n.text("sort." + FilterBar.sortName(filters.options.sort))
+            case .view:
+                button.active = inlinePreviewVisible
+                button.toolTip = L10n.text("scope.view")
+            }
+            button.setAccessibilityLabel(button.toolTip)
+        }
+    }
+
+    /// A tile toggles its library filter, like choosing it again from Saved Searches.
+    private func toggleLibraryFilter(_ filter: QuickFilter) {
+        if activeLibraryFilter?.linkID == filter.linkID {
+            clearLibraryFilter()
+            scopeChanged()
+        } else {
+            applyFilter(filter, restoreQuery: false)
+        }
+        refreshFieldTools()
+    }
+
     func setState(_ state: StateView.State?) {
         _ = view
         let previous: NSView = stateView ?? (results as NSView)
@@ -508,12 +626,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     @objc private func applyLibraryFilter(_ item: NSMenuItem) {
         guard let filter = item.representedObject as? QuickFilter else { return }
-        if activeLibraryFilter == filter {
-            clearLibraryFilter()
-            scopeChanged()
-        } else {
-            applyFilter(filter, restoreQuery: false)
-        }
+        toggleLibraryFilter(filter)
     }
 
     private func applyFilter(_ filter: QuickFilter, restoreQuery: Bool) {
@@ -652,7 +765,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         accessories.setFilters(chips)
         let files = snapshot ? [] : fileStash.files
         footer.stashCount = files.count
-        accessories.setStash(files: files, expanded: stashExpanded,
+        accessories.setStash(files: files, expanded: stashExpanded && !(windowChrome && files.isEmpty),
                              copy: { [weak self] in self?.copyStash() }, open: { [weak self] in self?.showStash() },
                              dragging: { [weak self] active in
                                  self?.dragging = active
@@ -721,6 +834,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         footer.hiddenStatusItems = StatusItem.hidden(in: preferences, interface: searchInterface)
         footer.backgroundOpacity = CGFloat(min(1, max(0, preferences.object(forKey: "statusBarOpacity") as? Double ?? 0)))
         filters.tintStrength = CGFloat(min(1, max(0, preferences.object(forKey: "filterTintStrength") as? Double ?? 1)))
+        applyInterfaceChrome()
     }
 
     private func syncBarPresentation(resize: Bool = true) {
@@ -820,6 +934,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         refreshApplicationSuggestions()
         filters.scopeActive = folderScope != nil || volumeScope != nil || savedCriteria != nil
         filters.searchOptionsActive = hiddenOnly || fuzzyNames
+        if windowChrome { refreshTiles(); titleBar.pinned = preferences.bool(forKey: "keepPanelOpenOnDefocus") }
         refreshAccessories()
         additionalSearchProvider?.visibilityChanged(true)
         setBrowsing(false)
@@ -1172,6 +1287,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         filters.classicToolbar = mode == .classic
         footer.classicLayout = mode == .classic
         applyResultsLayout()
+        applyInterfaceChrome()
         syncBarPresentation(resize: false)
         view.needsLayout = true
     }
@@ -1259,6 +1375,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if (view.window as? SearchPanel)?.hiding == true { return true }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if searchField.editor.hasMarkedText() { return false }
+        if windowChrome && !barCollapsed && !syntaxVisible && tiles.handleKey(event) { return true }
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
         if barCollapsed && event.keyCode == 125 && flags.intersection([.command, .control, .option, .shift]).isEmpty {
             expandSearchBar()
@@ -1463,6 +1580,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         footer.inlinePreviewVisible = visible
         footer.spacePreview = spaceOpensQuickLook
         refreshInlinePreview()
+        refreshFieldTools()
         if resize { (view.window as? SearchPanel)?.resizeForInlinePreview() }
         view.needsLayout = true
     }

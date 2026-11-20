@@ -52,6 +52,11 @@ enum Theme {
         }
     }
     static let panelSize = NSSize(width: 800, height: 560)
+    /// Results, stash and preview cards: a warm dark grey on the near-black Search Window, the system colour in light mode.
+    static let card = NSColor(name: "OilFindCard") { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(srgbRed: 38 / 255, green: 36 / 255, blue: 36 / 255, alpha: 1) : .controlBackgroundColor
+    }
     static let corner: CGFloat = 22
     static let searchHeight: CGFloat = 64
     static let filterHeight: CGFloat = 40

@@ -75,6 +75,8 @@ final class ResultsSelectionTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: -2000, y: -2000, width: 800, height: 560), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentViewController = controller
         window.orderFrontRegardless(); defer { window.close() }
+        // Search Window uses filter tiles; Classic keeps the animated category chips.
+        controller.prepareInterfaceSnapshot(.classic)
         controller.view.layoutSubtreeIfNeeded()
         let filters = controller.filters
         let plate = try XCTUnwrap(filters.subviews.compactMap { $0 as? TintPlate }.first)

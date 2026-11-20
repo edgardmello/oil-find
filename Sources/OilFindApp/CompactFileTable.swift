@@ -3,7 +3,8 @@ import AppKit
 enum CompactFileTable {
     static let rowHeight: CGFloat = 24
     static let headerHeight: CGFloat = 28
-    static let inset: CGFloat = 12
+    static let inset: CGFloat = 16
+    static let cardRadius: CGFloat = 12
     static let iconWidth: CGFloat = 44
     static let keys = ["name", "path", "size", "date"]
 
@@ -43,7 +44,7 @@ final class CompactFileHeader: NSTableHeaderView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.controlBackgroundColor.setFill()
+        Theme.card.setFill()
         dirtyRect.fill()
         let badge = NSRect(x: 20, y: 7, width: 14, height: 14)
         (isStash ? NSColor.systemPink : .secondaryLabelColor).setFill()

@@ -4,6 +4,8 @@ import QuartzCore
 final class PanelSurface: FlippedView {
     private let effect = NSVisualEffectView()
     private let tint: SurfaceTint
+    /// The Search Window sits on a near-black backdrop in dark mode so its cards stand out.
+    var deep = false { didSet { tint.deep = deep } }
     var material: SearchMaterial = .glassy {
         didSet {
             effect.isHidden = material == .opaque
@@ -36,6 +38,7 @@ final class PanelSurface: FlippedView {
 private final class SurfaceTint: NSView {
     let snapshot: Bool
     var material: SearchMaterial = .glassy { didSet { needsDisplay = true } }
+    var deep = false { didSet { needsDisplay = true } }
     init(snapshot: Bool) { self.snapshot = snapshot; super.init(frame: .zero) }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -48,6 +51,9 @@ private final class SurfaceTint: NSView {
             NSColor(srgbRed: dark ? 35/255 : 244/255, green: dark ? 35/255 : 244/255, blue: dark ? 38/255 : 246/255, alpha: 1).setFill(); path.fill()
         }
         (dark ? NSColor.black.withAlphaComponent(0.18) : NSColor.white.withAlphaComponent(0.30)).setFill(); path.fill()
+        if deep && dark {
+            NSColor(srgbRed: 9 / 255, green: 9 / 255, blue: 9 / 255, alpha: material == .opaque || snapshot ? 1 : 0.9).setFill(); path.fill()
+        }
         let pixel = Theme.pixel(self)
         (dark ? NSColor.white.withAlphaComponent(0.14) : NSColor.black.withAlphaComponent(0.10)).setStroke()
         let border = NSBezierPath(roundedRect: bounds.insetBy(dx: pixel / 2, dy: pixel / 2), xRadius: 22 - pixel / 2, yRadius: 22 - pixel / 2)

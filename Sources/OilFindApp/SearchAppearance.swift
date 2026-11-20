@@ -18,7 +18,8 @@ enum SearchInterface: String, CaseIterable {
 
     func expandedSize(preview: Bool) -> NSSize {
         switch self {
-        case .window, .classic: return NSSize(width: preview ? 1160 : 800, height: 560)
+        case .window: return NSSize(width: preview ? 1160 : 860, height: 728)
+        case .classic: return NSSize(width: preview ? 1160 : 800, height: 560)
         case .bar: return NSSize(width: preview ? 920 : 640, height: 410)
         }
     }

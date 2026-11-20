@@ -51,7 +51,9 @@ final class SearchAppearanceTests: XCTestCase {
 
         preferences.set(SearchInterface.window.rawValue, forKey: SearchInterface.key)
         controller.applySearchSetting(SearchInterface.key)
-        XCTAssertEqual(controller.filters.preferredHeight, FilterBar.toolbarHeight)
+        // Search Window moves the categories to its filter tiles; the selection carries over.
+        XCTAssertTrue(controller.filters.tileMode)
+        XCTAssertEqual(controller.filters.preferredHeight, 0)
         XCTAssertEqual(controller.filters.options.kind, 3)
         XCTAssertEqual(controller.searchField.text, "report")
     }
@@ -72,12 +74,40 @@ final class SearchAppearanceTests: XCTestCase {
         preferences.set(SearchInterface.window.rawValue, forKey: SearchInterface.key)
         controller.applySearchSetting(SearchInterface.key)
         XCTAssertTrue(controller.results.compact)
-        XCTAssertEqual(controller.filters.preferredHeight, FilterBar.toolbarHeight)
+        XCTAssertTrue(controller.filters.tileMode)
+        XCTAssertTrue(controller.searchField.boxed)
+        XCTAssertEqual(controller.filters.preferredHeight, 0)
 
         preferences.set(SearchInterface.bar.rawValue, forKey: SearchInterface.key)
         controller.applySearchSetting(SearchInterface.key)
         XCTAssertFalse(controller.results.compact)
+        XCTAssertFalse(controller.searchField.boxed)
         XCTAssertEqual(controller.filters.preferredHeight, 36)
+    }
+
+    func testSearchWindowTilesApplyLibraryFiltersFromOptionLetters() throws {
+        _ = NSApplication.shared
+        let suite = "OilFindTiles-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        preferences.set(SearchInterface.window.rawValue, forKey: SearchInterface.key)
+        let controller = SearchViewController(snapshot: false, preferences: preferences)
+        _ = controller.view
+        func option(_ key: String, shift: Bool = false) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: shift ? [.option, .shift] : .option,
+                                          timestamp: 0, windowNumber: 0, context: nil, characters: key,
+                                          charactersIgnoringModifiers: key, isARepeat: false, keyCode: 3))
+        }
+        XCTAssertTrue(controller.handleKey(try option("f")))
+        XCTAssertEqual(controller.filters.options.kind, 1)
+        XCTAssertTrue(controller.handleKey(try option("f")))
+        XCTAssertNil(controller.filters.options.kind, "Choosing the active tile again clears it")
+        // ⌃⌥S stays the stash shortcut instead of the System tile.
+        let stash = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.control, .option],
+                                                   timestamp: 0, windowNumber: 0, context: nil, characters: "s",
+                                                   charactersIgnoringModifiers: "s", isARepeat: false, keyCode: 1))
+        _ = controller.handleKey(stash)
+        XCTAssertNil(controller.filters.options.kind)
     }
 
     func testResultsMenuNoLongerOffersLayoutChoices() throws {
