@@ -5,10 +5,21 @@ enum SearchInterface: String, CaseIterable {
     static let key = "searchInterface"
 
     var title: String { L10n.text("settings.interface." + rawValue) }
+    var summary: String { L10n.text("settings.interface." + rawValue + ".summary") }
+
+    /// Each interface owns one results layout so the three stay distinct:
+    /// Search Window is the column table, Search Bar and Classic use list rows.
+    var usesTable: Bool { self == .window }
+
+    /// Status items an interface can show; Classic keeps the original footer set.
+    var statusItems: [StatusItem] {
+        self == .classic ? [.results, .duration, .open, .preview, .syntax] : StatusItem.allCases
+    }
 
     func expandedSize(preview: Bool) -> NSSize {
         switch self {
-        case .window, .classic: return NSSize(width: preview ? 1160 : 800, height: 560)
+        case .window: return NSSize(width: preview ? 1160 : 860, height: 728)
+        case .classic: return NSSize(width: preview ? 1160 : 800, height: 560)
         case .bar: return NSSize(width: preview ? 920 : 640, height: 410)
         }
     }

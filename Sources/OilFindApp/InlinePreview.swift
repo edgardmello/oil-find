@@ -9,6 +9,9 @@ final class InlinePreview: FlippedView {
     }
 
     var onClose: (() -> Void)?
+    /// The Search Window shows the preview as its own rounded card beside the results card.
+    var card = false { didSet { needsLayout = true; needsDisplay = true } }
+    private let icon = NSImageView()
     private let headerLine = SeparatorView()
     private let metadataLine = SeparatorView()
     private let metadataLabel = Theme.label(11, .regular, .secondaryLabelColor)
@@ -39,7 +42,7 @@ final class InlinePreview: FlippedView {
         closeButton.contentTintColor = .secondaryLabelColor
         closeButton.target = self
         closeButton.action = #selector(closePreview)
-        [titleLabel, pathLabel, closeButton, headerLine, metadataLine, metadataLabel].forEach(addSubview)
+        [titleLabel, pathLabel, closeButton, headerLine, metadataLine, metadataLabel, icon].forEach(addSubview)
         localize()
     }
 
@@ -58,11 +61,22 @@ final class InlinePreview: FlippedView {
         NSRect(x: 12, y: 70, width: max(0, bounds.width - 24), height: max(0, bounds.height - 116))
     }
 
+    override func draw(_ dirtyRect: NSRect) {
+        guard card else { return }
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: CompactFileTable.cardRadius, yRadius: CompactFileTable.cardRadius)
+        Theme.card.setFill(); path.fill()
+        NSColor.separatorColor.setStroke(); path.lineWidth = 1; path.stroke()
+    }
+
     override func layout() {
         super.layout()
+        divider.isHidden = card
+        icon.isHidden = !card || url == nil
+        let textX: CGFloat = icon.isHidden ? 16 : 44
+        icon.frame = NSRect(x: 14, y: 13, width: 24, height: 24)
         divider.frame = NSRect(x: 0, y: 0, width: Theme.pixel(self), height: bounds.height)
-        titleLabel.frame = NSRect(x: 16, y: 12, width: max(0, bounds.width - 62), height: 18)
-        pathLabel.frame = NSRect(x: 16, y: 33, width: max(0, bounds.width - 32), height: 15)
+        titleLabel.frame = NSRect(x: textX, y: 12, width: max(0, bounds.width - textX - 46), height: 18)
+        pathLabel.frame = NSRect(x: textX, y: 33, width: max(0, bounds.width - textX - 16), height: 15)
         closeButton.frame = NSRect(x: bounds.width - 38, y: 8, width: 28, height: 28)
         headerLine.frame = NSRect(x: 16, y: 58, width: max(0, bounds.width - 32), height: Theme.pixel(self))
         metadataLine.frame = NSRect(x: 16, y: max(58, bounds.height - 34), width: max(0, bounds.width - 32), height: Theme.pixel(self))
@@ -78,6 +92,8 @@ final class InlinePreview: FlippedView {
         if url != nil && url == self.url && !isUnavailable { return }
         self.url = url
         titleLabel.stringValue = url?.lastPathComponent ?? L10n.text("hint.preview")
+        icon.image = url.map { NSWorkspace.shared.icon(forFile: $0.path) }
+        needsLayout = true
         pathLabel.stringValue = url.map { Presentation.abbreviate(path: $0.deletingLastPathComponent().path, home: NSHomeDirectory()) } ?? ""
         titleLabel.toolTip = url?.lastPathComponent
         pathLabel.toolTip = url?.path

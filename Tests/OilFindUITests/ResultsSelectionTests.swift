@@ -33,8 +33,8 @@ final class ResultsSelectionTests: XCTestCase {
         XCTAssertEqual(results.selectedItems.map(\.path), paths)
     }
 
-    func testOpenWithRowFollowsResultsLayout() throws {
-        let app = NSApplication.shared
+    func testOpenWithRowBelongsToSearchWindow() throws {
+        _ = NSApplication.shared
         let suite = "OilFindOpenWith-" + UUID().uuidString
         let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { preferences.removePersistentDomain(forName: suite) }
@@ -44,19 +44,19 @@ final class ResultsSelectionTests: XCTestCase {
         try Data().write(to: root.appendingPathComponent("report.txt"))
         let config = IndexConfig(rootPath: root.path)
         let store = IndexStore(scan: try XCTUnwrap(Scanner(config: config, threads: 1).run()), config: config)
+        preferences.set(SearchInterface.classic.rawValue, forKey: SearchInterface.key)
         let controller = SearchViewController(snapshot: false, preferences: preferences)
         controller.additionalSources = { [SearchSource(id: "startup", displayName: "", isOnline: true, store: store)] }
         try controller.prepareSnapshot(state: "results", query: "report", options: .init(), store: store, selection: 0)
         _ = controller.view
         let footer = try XCTUnwrap(controller.panelBody.subviews.compactMap { $0 as? FooterBar }.first)
-        let menu = try XCTUnwrap(controller.filters.viewMenu?())
-        let compact = try XCTUnwrap(menu.items.first { $0.title == L10n.text("view.compact") })
 
         XCTAssertEqual(footer.desiredHeight, 34)
-        XCTAssertTrue(app.sendAction(try XCTUnwrap(compact.action), to: compact.target, from: compact))
+        preferences.set(SearchInterface.window.rawValue, forKey: SearchInterface.key)
+        controller.applySearchSetting(SearchInterface.key)
         XCTAssertEqual(footer.desiredHeight, 62)
-        preferences.set(false, forKey: "compactResults")
-        controller.applySearchSetting("compactResults")
+        preferences.set(SearchInterface.bar.rawValue, forKey: SearchInterface.key)
+        controller.applySearchSetting(SearchInterface.key)
         XCTAssertEqual(footer.desiredHeight, 34)
     }
 
@@ -75,6 +75,8 @@ final class ResultsSelectionTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: -2000, y: -2000, width: 800, height: 560), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentViewController = controller
         window.orderFrontRegardless(); defer { window.close() }
+        // Search Window uses filter tiles; Classic keeps the animated category chips.
+        controller.prepareInterfaceSnapshot(.classic)
         controller.view.layoutSubtreeIfNeeded()
         let filters = controller.filters
         let plate = try XCTUnwrap(filters.subviews.compactMap { $0 as? TintPlate }.first)

@@ -262,10 +262,12 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
         table.gridColor = .separatorColor
         scroll.contentInsets = enabled ? NSEdgeInsets() : NSEdgeInsets(top: 6, left: 0, bottom: 6, right: 0)
         scroll.drawsBackground = enabled
-        scroll.backgroundColor = .controlBackgroundColor
+        scroll.backgroundColor = Theme.card
         scroll.wantsLayer = true
-        scroll.layer?.cornerRadius = enabled ? CompactFileTable.inset : 0
+        scroll.layer?.cornerRadius = enabled ? CompactFileTable.cardRadius : 0
         scroll.layer?.masksToBounds = enabled
+        scroll.layer?.borderWidth = enabled ? 1 : 0
+        scroll.layer?.borderColor = NSColor.separatorColor.cgColor
         table.minimumDocumentHeight = 0
         table.reloadData()
         table.selectRowIndexes(selection, byExtendingSelection: false)
@@ -357,8 +359,10 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
         notifications.addObserver(self, selector: #selector(clipBoundsChanged), name: NSView.boundsDidChangeNotification, object: scroll.contentView)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsLayout = true }
     override func layout() {
         super.layout(); scroll.frame = compact ? bounds.insetBy(dx: CompactFileTable.inset, dy: 4) : bounds
+        if compact { effectiveAppearance.performAsCurrentDrawingAppearance { scroll.layer?.borderColor = NSColor.separatorColor.cgColor } }
         let width = scroll.contentSize.width
         if table.tableColumns[0].width != width { table.tableColumns[0].width = width }
         updateSelection(animated: false); recomputeHover()

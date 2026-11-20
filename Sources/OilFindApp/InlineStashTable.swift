@@ -41,10 +41,10 @@ final class InlineStashTable: NSScrollView, NSTableViewDataSource, NSTableViewDe
         hasVerticalScroller = true
         autohidesScrollers = true
         drawsBackground = true
-        backgroundColor = .controlBackgroundColor
+        backgroundColor = Theme.card
         scrollerStyle = .overlay
         wantsLayer = true
-        layer?.cornerRadius = CompactFileTable.inset
+        layer?.cornerRadius = CompactFileTable.cardRadius
         layer?.masksToBounds = true
         table.style = .plain
         table.backgroundColor = .clear

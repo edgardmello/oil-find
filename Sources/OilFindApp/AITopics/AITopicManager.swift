@@ -156,7 +156,12 @@ final class AITopicManager: ObservableObject {
     private func canonicalRoots() -> CanonicalRoots {
         let raw = [locations.codex.path, locations.claude.path, locations.claudeDesktop.path, locations.workbuddy.path]
         let resolved = raw.map(Self.canonicalPath)
-        return CanonicalRoots(codex: resolved[0], claude: resolved[1], desktop: resolved[2], workbuddy: resolved[3], prefixes: Array(Set(raw + resolved)))
+        // FSEvents reports /private/var and /private/tmp while resolvingSymlinksInPath strips /private,
+        // so the cheap prefix check has to accept both spellings of each root.
+        let prefixes = (raw + resolved).flatMap { path in
+            path.hasPrefix("/private/") ? [path, String(path.dropFirst("/private".count))] : [path, "/private" + path]
+        }
+        return CanonicalRoots(codex: resolved[0], claude: resolved[1], desktop: resolved[2], workbuddy: resolved[3], prefixes: Array(Set(prefixes)))
     }
     private func affectsTopics(_ path: String, provider: AITopicProvider, roots: CanonicalRoots) -> Bool {
         let (codex, claude, desktop, workbuddy) = (roots.codex, roots.claude, roots.desktop, roots.workbuddy)

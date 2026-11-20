@@ -3,7 +3,15 @@ import OilFindCore
 
 final class FilterBar: FlippedView, NSMenuDelegate {
     static let toolbarHeight: CGFloat = 66
-    var preferredHeight: CGFloat { classicToolbar ? 40 : (compactToolbar ? 36 : Self.toolbarHeight) }
+    var preferredHeight: CGFloat { tileMode ? 0 : (classicToolbar ? 40 : (compactToolbar ? 36 : Self.toolbarHeight)) }
+    /// The Search Window moves categories to its tile strip and the menus into the search field.
+    var tileMode = false {
+        didSet {
+            guard tileMode != oldValue else { return }
+            updateCategoryVisibility()
+            needsLayout = true
+        }
+    }
     var compactToolbar = false {
         didSet {
             guard compactToolbar != oldValue else { return }
@@ -58,6 +66,7 @@ final class FilterBar: FlippedView, NSMenuDelegate {
     var onChange: (() -> Void)?
     var onMenuTracking: ((Bool) -> Void)?
     var onSortChange: (() -> Void)?
+    var onToolStateChange: (() -> Void)?
     var options = SearchOptions() { didSet { refresh() } }
     var isEnabled = true {
         didSet { alphaValue = isEnabled ? 1 : 0.4; (buttons + toolbarButtons + [categoryButton]).forEach { $0.isEnabled = isEnabled } }
@@ -112,6 +121,7 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         categoryButton.textTint = selectedCategory == 0 ? nil : activeTint
         categoryButton.needsDisplay = true
         needsLayout = true
+        onToolStateChange?()
     }
     func localize() {
         refreshScope()
@@ -124,6 +134,11 @@ final class FilterBar: FlippedView, NSMenuDelegate {
     private var selectedCategory: Int { additionalSelected ? Self.names.count : Int(options.kind ?? 0) }
 
     private func updateCategoryVisibility() {
+        if tileMode {
+            (buttons + toolbarButtons + [categoryButton, capsule]).forEach { $0.isHidden = true }
+            return
+        }
+        sortButton.isHidden = false
         for (index, button) in buttons.enumerated() {
             button.isHidden = compactToolbar || (index == Self.names.count && additionalTitle == nil)
         }
@@ -160,11 +175,13 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         let sortTitle = L10n.text("sort." + Self.sortName(options.sort))
         let changedSort = sortButton.title != sortTitle
         sortButton.title = sortTitle; sortButton.needsDisplay = true
+        onToolStateChange?()
         if laidOut && !compactToolbar { moveCapsule(animated: window?.isVisible == true) }
         if changedSort || sortButton.frame.isEmpty { needsLayout = true }
     }
     override func layout() {
         super.layout()
+        if tileMode { return }
         if classicToolbar {
             let width = Theme.textWidth(sortButton.title, font: sortButton.font!) + 32
             sortButton.frame = NSRect(x: bounds.width - 18 - width, y: 7, width: width, height: 26)
@@ -234,8 +251,30 @@ final class FilterBar: FlippedView, NSMenuDelegate {
         let count = Self.names.count + (additionalTitle == nil ? 0 : 1)
         select(((additionalSelected ? Self.names.count : Int(options.kind ?? 0)) + delta + count) % count)
     }
+    enum ToolMenu { case scope, options, saved, view, sort }
+
+    /// Opens one of the toolbar menus from a control outside the bar, such as the search field's tools.
+    func popUp(_ tool: ToolMenu, from anchor: NSView) {
+        guard isEnabled else { return }
+        let menu: NSMenu?
+        switch tool {
+        case .scope: menu = scopeMenu?()
+        case .options: menu = searchOptionsMenu?()
+        case .saved: menu = savedMenu?()
+        case .view: menu = viewMenu?()
+        case .sort: menu = makeSortMenu()
+        }
+        guard let menu else { return }
+        menu.delegate = self
+        menu.popUp(positioning: nil, at: NSPoint(x: anchor.bounds.minX, y: anchor.isFlipped ? anchor.bounds.maxY + 4 : -4), in: anchor)
+    }
+
     private func showSortMenu() {
         guard isEnabled else { return }
+        show(makeSortMenu(), under: sortButton)
+    }
+
+    private func makeSortMenu() -> NSMenu {
         let menu = NSMenu(); menu.delegate = self
         for (i, key) in [SortKey.relevance, .name, .modified, .size].enumerated() {
             if i == 0 && options.sortsRecentResults { continue }
@@ -251,7 +290,7 @@ final class FilterBar: FlippedView, NSMenuDelegate {
                 menu.addItem(withTitle: button.title, action: nil, keyEquivalent: "").submenu = submenu
             }
         }
-        show(menu, under: sortButton)
+        return menu
     }
 
     private func show(_ menu: NSMenu, under button: ChromeButton) {
