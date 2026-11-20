@@ -327,6 +327,10 @@ private struct SettingsForm: View {
         })
     }
 
+    private var currentInterface: SearchInterface {
+        SearchInterface(rawValue: model.preferences.string(forKey: SearchInterface.key) ?? "") ?? .window
+    }
+
     private func stylePreference<Value>(_ key: String, fallback: Value) -> Binding<Value> {
         Binding(get: { model.preferences.object(forKey: key) as? Value ?? fallback }, set: { value in
             model.objectWillChange.send()
@@ -398,7 +402,12 @@ private struct SettingsForm: View {
                                         .foregroundStyle(Color.accentColor)
                                     Capsule().fill(.secondary.opacity(0.45)).frame(width: row.isMultiple(of: 2) ? 66 : 46, height: 3)
                                     Spacer()
-                                    Capsule().fill(.secondary.opacity(0.25)).frame(width: 30, height: 3)
+                                    if mode.usesTable {
+                                        // Column hints: path, size and date.
+                                        Capsule().fill(.secondary.opacity(0.25)).frame(width: 22, height: 3)
+                                        Capsule().fill(.secondary.opacity(0.25)).frame(width: 12, height: 3)
+                                    }
+                                    Capsule().fill(.secondary.opacity(0.25)).frame(width: mode.usesTable ? 18 : 30, height: 3)
                                 }
                             }
                             .font(.caption2)
@@ -426,7 +435,13 @@ private struct SettingsForm: View {
                 Text(mode.title)
                     .fontWeight(selected ? .semibold : .regular)
                     .foregroundStyle(selected ? .primary : .secondary)
+                Text(mode.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .top)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -435,7 +450,7 @@ private struct SettingsForm: View {
 
     private func statusPreview(_ mode: SearchInterface) -> some View {
         let hidden = StatusItem.hidden(in: model.preferences, interface: mode)
-        let items: [StatusItem] = mode == .classic ? [.results, .duration, .open, .preview, .syntax] : StatusItem.allCases
+        let items = mode.statusItems
         return VStack(alignment: .leading, spacing: 6) {
             Text(mode.title).fontWeight(.medium)
             ViewThatFits(in: .horizontal) {
@@ -659,7 +674,7 @@ private struct SettingsForm: View {
             let interface = stylePreference(SearchInterface.key, fallback: SearchInterface.window.rawValue)
             let size = stylePreference("searchTextSize", fallback: 100)
             Section(L10n.text("settings.interface.title")) {
-                HStack(spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
                     interfaceCard(.window, selection: interface)
                     interfaceCard(.bar, selection: interface)
                     interfaceCard(.classic, selection: interface)
@@ -668,12 +683,6 @@ private struct SettingsForm: View {
                     Text(L10n.text("settings.interface.recent")).tag(true)
                     Text(L10n.text("settings.interface.empty")).tag(false)
                 }
-                Picker(L10n.text("view.results"), selection: interface.wrappedValue == SearchInterface.classic.rawValue
-                       ? .constant(false) : preference("compactResults")) {
-                    Text(L10n.text("view.original")).tag(false)
-                    Text(L10n.text("view.compact")).tag(true)
-                }
-                .disabled(interface.wrappedValue == SearchInterface.classic.rawValue)
                 option("settings.style.preview", help: "settings.style.previewHint", value: preference("defaultSidePreview"))
             }
             Section(L10n.text("settings.general.window")) {
@@ -734,7 +743,7 @@ private struct SettingsForm: View {
             }
             Section(L10n.text("settings.actionBar.preview")) {
                 HStack(spacing: 12) {
-                    let pinned = preference("compactResults").wrappedValue
+                    let pinned = currentInterface.usesTable
                         ? PinnedFileAction.selected(in: model.preferences) : []
                     if !pinned.isEmpty {
                         ForEach(pinned, id: \.rawValue) { Text($0.title) }
@@ -748,7 +757,7 @@ private struct SettingsForm: View {
                     }
                     Spacer()
                 }.foregroundStyle(.secondary)
-                if preference("compactResults").wrappedValue && preference("showOpenWithRow", default: true).wrappedValue {
+                if currentInterface.usesTable && preference("showOpenWithRow", default: true).wrappedValue {
                     Label(L10n.text("footer.openWith"), systemImage: "app")
                         .foregroundStyle(.secondary)
                 }

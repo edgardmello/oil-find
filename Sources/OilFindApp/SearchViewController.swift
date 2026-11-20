@@ -208,7 +208,6 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         searchField.onChange = { [weak self] in self?.setBrowsing(false); self?.startSearch() }
         searchField.onKey = { [weak self] event in self?.handleKey(event) ?? false }
         filters.onChange = { [weak self] in self?.scopeChanged(resetAdditional: false) }
-        if snapshot { results.setCompact(preferences.bool(forKey: "compactResults")) }
         filters.scopeMenu = { [weak self] in self?.makeScopeMenu() ?? NSMenu() }
         filters.searchOptionsMenu = { [weak self] in self?.makeSearchOptionsMenu() ?? NSMenu() }
         filters.savedMenu = { [weak self] in self?.makeQuickFilterMenu() ?? NSMenu() }
@@ -411,14 +410,6 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
 
     private func makeResultsViewMenu() -> NSMenu {
         let menu = NSMenu()
-        let layouts = searchInterface == .classic ? ["view.original"] : ["view.original", "view.compact"]
-        for (tag, key) in layouts.enumerated() {
-            let item = menu.addItem(withTitle: L10n.text(key), action: #selector(selectResultsView(_:)), keyEquivalent: "")
-            item.tag = tag
-            item.target = self
-            item.state = (tag == 1) == results.compact ? .on : .off
-        }
-        menu.addItem(.separator())
         let preview = menu.addItem(withTitle: L10n.text("inlinePreview.show"),
                                    action: #selector(toggleInlinePreview), keyEquivalent: "")
         preview.target = self
@@ -440,14 +431,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         applySearchSetting(SearchInterface.key)
     }
 
-    @objc private func selectResultsView(_ item: NSMenuItem) {
-        let compact = item.tag == 1
-        if !snapshot && searchInterface != .classic { preferences.set(compact, forKey: "compactResults") }
-        setResultsLayout(compact: compact)
-    }
-
-    private func setResultsLayout(compact: Bool) {
-        results.setCompact(searchInterface != .classic && compact)
+    private func applyResultsLayout() {
+        results.setCompact(searchInterface.usesTable)
         refreshPinnedActions()
         refreshApplicationSuggestions()
     }
@@ -728,7 +713,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         filters.compactToolbar = searchInterface == .bar
         filters.classicToolbar = searchInterface == .classic
         footer.classicLayout = searchInterface == .classic
-        setResultsLayout(compact: preferences.bool(forKey: "compactResults"))
+        applyResultsLayout()
         (view as? PanelSurface)?.material = SearchMaterial(rawValue: preferences.string(forKey: SearchMaterial.key) ?? "") ?? .glassy
         let scale = CGFloat(min(125, max(85, preferences.object(forKey: "searchTextSize") as? Int ?? 100))) / 100
         searchField.textScale = scale
@@ -770,8 +755,6 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             return
         }
         switch key {
-        case "compactResults":
-            setResultsLayout(compact: preferences.bool(forKey: key))
         case "fuzzyNames":
             fuzzyNames = preferences.bool(forKey: key)
             scopeChanged()
@@ -1188,7 +1171,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         filters.compactToolbar = mode == .bar
         filters.classicToolbar = mode == .classic
         footer.classicLayout = mode == .classic
-        if mode == .classic { setResultsLayout(compact: false) }
+        applyResultsLayout()
         syncBarPresentation(resize: false)
         view.needsLayout = true
     }
