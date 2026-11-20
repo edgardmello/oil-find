@@ -111,7 +111,10 @@ final class M17Tests: XCTestCase {
             XCTAssertEqual(Coverage.explain(path: excluded + "/readme.md", config: config, store: store), .userExcluded(excluded))
             XCTAssertEqual(Coverage.explain(path: root.path + "/node_modules/readme.md", config: config, store: store), .scope(.dependency))
             XCTAssertEqual(Coverage.explain(path: "/Volumes/example/a", config: config, store: store), .volume)
-            XCTAssertEqual(Coverage.explain(path: root.path + "/missing", config: config, store: store), .pending)
+            XCTAssertEqual(Coverage.explain(path: root.path + "/missing", config: config, store: store), .missing)
+            // A file that exists but arrived after the scan is waiting for the index, not absent.
+            try Data(repeating: 65, count: 4).write(to: root.appendingPathComponent("arrived-later.txt"))
+            XCTAssertEqual(Coverage.explain(path: root.path + "/arrived-later.txt", config: config, store: store), .pending)
             _ = IndexUpdater(config: config).apply([FSChange(path: excluded + "/readme.md", eventId: 4), FSChange(path: excluded + "/readme.md", eventId: 5)], to: store)
             XCTAssertEqual(store.coverage[.userExcluded].count, 2)
             var stats = CoverageStats()
