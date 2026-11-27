@@ -239,6 +239,7 @@ func resultRefreshAction(oldItems: [UInt32], newItems: [UInt32], sameStore: Bool
 }
 
 final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate {
+    override var acceptsFirstResponder: Bool { true }
     private let scroll = ResultScrollView()
     private let table = ResultTable()
     private let compactHeader = CompactFileHeader(stash: false)

@@ -268,10 +268,11 @@ final class SearchPanel: NSPanel {
         fade?.start()
     }
     override func keyDown(with event: NSEvent) {
-        if !searchController.handleKey(event) { super.keyDown(with: event) }
+        if searchController.handleKey(event) || searchController.resumeSearchEditing(with: event) { return }
+        super.keyDown(with: event)
     }
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if !searchController.searchField.editor.hasMarkedText(), searchController.handleKey(event) { return true }
+        if searchController.handleKey(event) { return true }
         return super.performKeyEquivalent(with: event)
     }
 }

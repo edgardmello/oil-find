@@ -22,6 +22,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private let inlinePreview = InlinePreview(frame: .zero)
     private(set) var inlinePreviewVisible = false
     private var quickLookDismissTime: CFAbsoluteTime = 0
+    private var lastEscape: TimeInterval?
     private let topLine = SeparatorView(), bottomLine = SeparatorView()
     private let empty = StateView(.empty), indexing = StateView(.indexing)
     let syntax = SyntaxReference(frame: .zero)
@@ -73,6 +74,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private var pendingNewSearch: Bool?
     private var pendingMetadataSources: [SearchSource]?
     private(set) var browsingResults = false
+    private var resultsEditingSelection: NSRange?
     var previewWithSpace: Bool { preferences.object(forKey: "previewWithSpace") as? Bool ?? true }
     private var spaceOpensQuickLook: Bool { browsingResults && previewWithSpace && !inlinePreviewVisible }
     private func setBrowsing(_ browsing: Bool) {
@@ -129,6 +131,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     func panelDidHide() {
+        lastEscape = nil
         lastHiddenAt = Date()
         searchHintTimer?.invalidate()
         searchHintTimer = nil
@@ -242,6 +245,10 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         searchField.onSelectionChange = { [weak self] in self?.refreshDiagnostics() }
         searchField.editor.onPointerSelection = { [weak self] in self?.setBrowsing(false) }
         searchField.onChange = { [weak self] in self?.setBrowsing(false); self?.startSearch() }
+        searchField.editor.onFocus = { [weak self] in
+            self?.setBrowsing(false)
+            self?.resultsEditingSelection = nil
+        }
         searchField.onKey = { [weak self] event in self?.handleKey(event) ?? false }
         filters.onChange = { [weak self] in self?.scopeChanged(resetAdditional: false) }
         filters.scopeMenu = { [weak self] in self?.makeScopeMenu() ?? NSMenu() }
@@ -303,15 +310,17 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             guard let self, self.results.selectedItem?.source.isOnline == true else { return nil }
             return self.activePreviewURL
         }
-        quickLook.onWillOpen = { [weak self] in self?.rememberFocus() }
-        quickLook.onReclaimFocus = { [weak self] in self?.restoreFocus() }
+        quickLook.onWillOpen = { [weak self] in self?.focusPreviewResults() }
+        quickLook.onReclaimFocus = { [weak self] in self?.reclaimSearchWindow() }
         quickLook.onWillClose = { [weak self] in
-            self?.quickLookDismissTime = CFAbsoluteTimeGetCurrent()
+            guard let self else { return }
+            self.quickLookDismissTime = CFAbsoluteTimeGetCurrent()
+            self.focusPreviewResults()
         }
         quickLook.onDidClose = { [weak self] in
-            guard let self, let window = self.view.window, window.isVisible else { return }
+            guard let self else { return }
             self.quickLookDismissTime = CFAbsoluteTimeGetCurrent()
-            self.restoreFocus()
+            self.reclaimSearchWindow()
         }
         quickLook.onKey = { [weak self] event in self?.forwardPreviewKey(event) ?? false }
         inlinePreview.onClose = { [weak self] in self?.toggleInlinePreview() }
@@ -955,6 +964,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     }
 
     func panelWillShow() {
+        lastEscape = nil
+        resultsEditingSelection = nil
         startSearchHints()
         if !snapshot {
             for key in ["showActionHints", "showActionsMenu", "showActionDividers"] {
@@ -1411,7 +1422,15 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     func handleKey(_ event: NSEvent) -> Bool {
         if (view.window as? SearchPanel)?.hiding == true { return true }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if searchField.editor.hasMarkedText() { return false }
+        let chord = StashShortcut.Chord(keyCode: UInt32(event.keyCode), modifiers: HotKey.carbonModifiers(flags))
+        let shortcut = panelShortcuts[chord]
+        let composing = searchField.editor.hasMarkedText()
+        if shortcut != .escape || composing { lastEscape = nil }
+        if composing { return false }
+        if shortcut == .escape {
+            if !event.isARepeat { handleEscape(at: event.timestamp) }
+            return true
+        }
         if windowChrome && !barCollapsed && !syntaxVisible && tiles.handleKey(event) { return true }
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
         if barCollapsed && event.keyCode == 125 && flags.intersection([.command, .control, .option, .shift]).isEmpty {
@@ -1429,7 +1448,6 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             default: break
             }
         }
-        let chord = StashShortcut.Chord(keyCode: UInt32(event.keyCode), modifiers: HotKey.carbonModifiers(flags))
         var action: StashShortcut?
         if event.keyCode == 76, chord.modifiers == StashShortcut.open.defaultChord.modifiers,
            StashShortcut.open.chord(in: preferences) == StashShortcut.open.defaultChord {
@@ -1438,7 +1456,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                   StashShortcut.reveal.chord(in: preferences) == StashShortcut.reveal.defaultChord {
             action = .reveal
         } else {
-            action = panelShortcuts[chord]
+            action = shortcut
         }
         if action == nil && preferences.bool(forKey: "controlNavigation")
             && flags.intersection([.command, .control, .option, .shift]) == .control {
@@ -1469,13 +1487,6 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
         if action == .clearStash {
             if !event.isARepeat { clearStash() }
-            return true
-        }
-        if action == .escape {
-            if syntaxVisible { toggleSyntax(false) }
-            else if quickLook.isVisible { quickLook.close() }
-            else if inlinePreview.selectedFolderFileURL != nil { inlinePreview.leaveFolderFiles() }
-            else { hidePanel?() }
             return true
         }
         if syntaxVisible { return false }
@@ -1563,6 +1574,20 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             } else { return false }
         }
         return true
+    }
+    private func handleEscape(at timestamp: TimeInterval) {
+        let previous = lastEscape
+        lastEscape = timestamp
+        if quickLook.isVisible {
+            quickLook.close()
+        } else if syntaxVisible {
+            toggleSyntax(false)
+        } else if inlinePreview.selectedFolderFileURL != nil {
+            inlinePreview.leaveFolderFiles()
+        } else if let previous, (0...NSEvent.doubleClickInterval).contains(timestamp - previous) {
+            lastEscape = nil
+            hidePanel?()
+        }
     }
     private func openExplicitPath(_ path: String) {
         let text = searchField.text
@@ -1677,35 +1702,52 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private func previewSelected() {
         if quickLook.isVisible { quickLook.close() } else if allowOnlineAction() { quickLook.open() }
     }
-    /// Selection in the search field before the preview opened, restored when it closes.
+    private func focusPreviewResults() {
+        guard let window = view.window, window.isVisible, (window as? SearchPanel)?.hiding != true else { return }
+        if window.firstResponder === searchField.editor {
+            resultsEditingSelection = searchField.editor.selectedRange
+        }
+        if window.firstResponder !== results { window.makeFirstResponder(results) }
+        setBrowsing(true)
+    }
+
+    private func reclaimSearchWindow() {
+        guard let window = view.window, window.isVisible, !window.isKeyWindow,
+              (window as? SearchPanel)?.hiding != true else { return }
+        window.makeKey()
+    }
+
+    func resumeSearchEditing(with event: NSEvent) -> Bool {
+        guard view.window?.firstResponder === results, !quickLook.isVisible,
+              event.modifierFlags.intersection([.command, .control, .function]).isEmpty,
+              let characters = event.characters else { return false }
+        // An empty character string can be the first key of a dead-key sequence.
+        if let first = characters.unicodeScalars.first,
+           CharacterSet.controlCharacters.contains(first) || (0xf700...0xf8ff).contains(first.value) { return false }
+        searchField.restoreEditing(selection: resultsEditingSelection)
+        guard searchField.input.currentEditor() === searchField.editor else { return false }
+        searchField.editor.edit(with: event)
+        return true
+    }
+
+    /// Selection in the search field before a modal action.
     private var focusSelection: NSRange?
     private func rememberFocus() {
         guard let window = view.window else { return }
         focusSelection = window.firstResponder === searchField.editor ? searchField.editor.selectedRange : nil
     }
-    /// Gives key status back to the search panel and puts the caret back where it was,
-    /// without selecting the whole query (which made the next keystroke replace it).
     private func restoreFocus() {
         guard let window = view.window, window.isVisible, (window as? SearchPanel)?.hiding != true else { return }
         if !window.isKeyWindow { window.makeKey() }
-        if window.firstResponder === searchField.editor { focusSelection = nil; return }
-        let length = (searchField.text as NSString).length
-        let range = focusSelection ?? NSRange(location: length, length: 0)
-        focusSelection = nil
-        searchField.focus()
-        let location = min(range.location, length)
-        searchField.editor.selectedRange = NSRange(location: location, length: min(range.length, length - location))
+        defer { focusSelection = nil }
+        guard window.firstResponder !== searchField.editor, window.firstResponder !== results else { return }
+        searchField.restoreEditing(selection: focusSelection)
     }
     /// Keys that reach the preview panel while it is key: take focus back and replay them
-    /// through the search panel, so navigation keeps working and typed text lands in the field.
+    /// through the same shortcut handler as the search panel.
     private func forwardPreviewKey(_ event: NSEvent) -> Bool {
-        restoreFocus()
-        if handleKey(event) { return true }
-        guard view.window?.firstResponder === searchField.editor else { return false }
-        let flags = event.modifierFlags.intersection([.command, .control])
-        guard flags.isEmpty else { return false }
-        searchField.editor.keyDown(with: event)
-        return true
+        reclaimSearchWindow()
+        return handleKey(event) || resumeSearchEditing(with: event)
     }
     private func copyPath() {
         if let item = results.selectedAdditional { performAdditional(item, kind: .copy); return }
