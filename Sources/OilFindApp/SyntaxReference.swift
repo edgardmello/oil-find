@@ -23,6 +23,12 @@ final class SyntaxReference: FlippedView {
         (".jpg .png", "Match either extension"),
         ("ext:pdf;docx", "Filter by extension"),
         ("in:Documents", "Search inside a folder"),
+        ("orientation:portrait", "syntax.orientation"),
+        ("ratio:9:16", "syntax.ratio"),
+        ("contains:kind:video", "syntax.containsKind"),
+        ("contains:kind:video orientation:portrait", "syntax.containsOrientation"),
+        ("contains:ext:mp4;mov;mkv", "syntax.containsExt"),
+        ("in:\"~/My Projects\" contains:ext:pdf", "syntax.containsScope"),
         ("depth:2", "Search up to two folder levels"),
         ("folder:photos", "Find matching folders"),
         ("file:", "Find files only"),
@@ -62,7 +68,14 @@ final class SyntaxReference: FlippedView {
             [$0.symbols(in: shortcutPreferences), $0.settingsTitle]
         }
     }
-    var contentHeight: CGFloat { CGFloat(410 + keyLabels.count * 20 + 24) }
+    private func moreRowHeight(_ index: Int) -> CGFloat {
+        Self.more[index].1.hasPrefix("syntax.") ? 39 : 22
+    }
+    var contentHeight: CGFloat {
+        let keysHeight = CGFloat(410 + keyLabels.count * 20 + 24)
+        let moreHeight = Self.more.indices.reduce(CGFloat(66)) { $0 + moreRowHeight($1) }
+        return max(keysHeight, moreHeight)
+    }
     private var split: CGFloat { (bounds.width * 0.54).rounded() }
     override init(frame: NSRect) {
         super.init(frame: frame); wantsLayer = true
@@ -107,8 +120,9 @@ final class SyntaxReference: FlippedView {
             descriptions[i].stringValue = row[1]; groups[i].stringValue = row[2]
         }
         for (i, row) in moreRows.enumerated() {
-            moreButtons[i].title = row[0]; moreExamples[i].stringValue = row[0]; moreDescriptions[i].stringValue = row[1]
-            moreButtons[i].toolTip = row[1]
+            let description = row[1].hasPrefix("syntax.") ? L10n.text(row[1]) : row[1]
+            moreButtons[i].title = row[0]; moreExamples[i].stringValue = row[0]; moreDescriptions[i].stringValue = description
+            moreButtons[i].toolTip = row[0] + "\n" + description
         }
         for (i, row) in keyRows.enumerated() { keyLabels[i].stringValue = row[0]; keyDescriptions[i].stringValue = row[1]; keyDescriptions[i].toolTip = row[1] }
         needsLayout = true
@@ -126,10 +140,16 @@ final class SyntaxReference: FlippedView {
         }
         let x = split + 28, width = max(0, bounds.width - x - 24)
         moreTitle.frame = NSRect(x: x, y: 26, width: width, height: 18)
+        var rowY: CGFloat = 50
         for i in moreButtons.indices {
-            moreButtons[i].frame = NSRect(x: x - 6, y: CGFloat(50 + i * 22), width: width + 6, height: 22)
-            moreExamples[i].frame = NSRect(x: 6, y: 2, width: 122, height: 18)
-            moreDescriptions[i].frame = NSRect(x: 132, y: 3, width: max(0, moreButtons[i].bounds.width - 136), height: 17)
+            let height = moreRowHeight(i)
+            let twoLines = height > 22
+            let descriptionX: CGFloat = twoLines ? 6 : 132
+            moreButtons[i].frame = NSRect(x: x - 6, y: rowY, width: width + 6, height: height)
+            moreExamples[i].frame = NSRect(x: 6, y: 2, width: twoLines ? width : 122, height: 18)
+            moreDescriptions[i].frame = NSRect(x: descriptionX, y: twoLines ? 19 : 3,
+                                              width: max(0, width + 2 - descriptionX), height: 17)
+            rowY += height
         }
         let keysTop: CGFloat = 410
         let keysX: CGFloat = 28

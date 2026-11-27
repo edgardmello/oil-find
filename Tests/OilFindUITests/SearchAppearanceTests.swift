@@ -4,6 +4,49 @@ import OilFindCore
 @testable import OilFindApp
 
 final class SearchAppearanceTests: XCTestCase {
+    func testCompactHeaderDragResizesAdjacentColumns() throws {
+        _ = NSApplication.shared
+        let header = CompactFileHeader(stash: false)
+        header.frame = NSRect(x: 0, y: 0, width: 700, height: CompactFileTable.headerHeight)
+        let window = NSWindow(contentRect: header.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = header
+        defer { window.close() }
+        let widths = CompactFileTable.widths(for: header.bounds.width)
+        let x = CompactFileTable.iconWidth + widths[0]
+        header.onResize = { header.proportions = $0 }
+        defer { header.onResize = nil }
+        func event(_ type: NSEvent.EventType, x: CGFloat) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: 10), modifierFlags: [],
+                                           timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                           eventNumber: 0, clickCount: 1, pressure: 1))
+        }
+        header.mouseDown(with: try event(.leftMouseDown, x: x))
+        header.mouseDragged(with: try event(.leftMouseDragged, x: x + 50))
+        header.mouseUp(with: try event(.leftMouseUp, x: x + 50))
+        let resized = CompactFileTable.widths(for: header.bounds.width, proportions: header.proportions)
+        XCTAssertEqual(resized[0], widths[0] + 50, accuracy: 0.01)
+        XCTAssertEqual(resized[1], widths[1] - 50, accuracy: 0.01)
+        XCTAssertEqual(resized[2], widths[2], accuracy: 0.01)
+    }
+
+    func testSearchWindowKeepsUserSizeWithPreviewAndAnchorsTopLeft() throws {
+        _ = NSApplication.shared
+        let panel = SearchPanel(snapshot: true)
+        defer { panel.close() }
+        let screen = try XCTUnwrap(NSScreen.main)
+        let area = screen.visibleFrame
+        guard area.width >= 900, area.height >= 600 else { throw XCTSkip("The resize fixture requires a 900 × 600 display.") }
+        panel.setFrame(NSRect(x: area.minX + 10, y: area.maxY - 510, width: 720, height: 500), display: false)
+        let top = panel.frame.maxY
+        panel.resizeFromUser(to: NSSize(width: 880, height: 540))
+        XCTAssertEqual(panel.frame.minX, area.minX + 10)
+        XCTAssertEqual(panel.frame.maxY, top)
+        XCTAssertEqual(panel.frame.size, NSSize(width: 880, height: 540))
+        panel.searchController.setInlinePreviewVisible(true)
+        XCTAssertEqual(panel.frame.size, NSSize(width: 880, height: 540))
+    }
+
     func testSearchBarOpensCollapsedAndDownArrowExpandsIt() throws {
         _ = NSApplication.shared
         let suite = "OilFindAppearance-" + UUID().uuidString

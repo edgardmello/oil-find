@@ -19,15 +19,14 @@ final class QuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
     var onWillClose: (() -> Void)?
     var onDidClose: (() -> Void)?
     private var observers: [Any] = []
+    private var keyMonitor: Any?
+    private var presenting = false
 
-    var isVisible: Bool { QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isVisible }
-
-    func toggle() {
-        if isVisible { close() } else { open() }
-    }
+    var isVisible: Bool { presenting && QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared().isVisible }
 
     func open() {
         guard !isVisible, selectedURL?() != nil, let panel = QLPreviewPanel.shared() else { return }
+        presenting = true
         onWillOpen?()
         panel.updateController()
         panel.reloadData()
@@ -38,11 +37,14 @@ final class QuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
 
     func close() {
         guard isVisible else { return }
-        onWillClose?()
-        if QLPreviewPanel.sharedPreviewPanelExists() {
-            QLPreviewPanel.shared().orderOut(nil)
-        }
+        beginClosing()
+        QLPreviewPanel.shared().orderOut(nil)
         onDidClose?()
+    }
+
+    private func beginClosing() {
+        presenting = false
+        onWillClose?()
     }
 
     func begin(_ panel: QLPreviewPanel) {
@@ -50,9 +52,18 @@ final class QuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
         panel.delegate = self
         guard observers.isEmpty else { return }
         let center = NotificationCenter.default
+        // Quick Look can consume Escape before consulting its delegate.
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak panel] event in
+            guard let panel, event.window === panel, self?.onKey?(event) == true else { return event }
+            return nil
+        }
         observers.append(center.addObserver(forName: NSWindow.willCloseNotification, object: panel, queue: .main) { [weak self] _ in
-            self?.onWillClose?()
-            DispatchQueue.main.async { [weak self] in self?.onDidClose?() }
+            guard let self, self.presenting else { return }
+            self.beginClosing()
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.presenting else { return }
+                self.onDidClose?()
+            }
         })
         observers.append(center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main) { [weak self] _ in
             // Defer so the key-window transition finishes before key status is handed back.
@@ -68,12 +79,24 @@ final class QuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
         panel.delegate = nil
         observers.forEach { NotificationCenter.default.removeObserver($0) }
         observers.removeAll()
+        removeKeyMonitor()
         // The panel can also go away on its own (close button, orderOut by the system)
         // without posting willClose; restore focus in that case too.
         DispatchQueue.main.async { [weak self] in
-            guard let self, !self.isVisible else { return }
+            guard let self, self.presenting, !self.isVisible else { return }
+            self.beginClosing()
             self.onDidClose?()
         }
+    }
+
+    private func removeKeyMonitor() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+    }
+
+    deinit {
+        removeKeyMonitor()
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
     func refresh() { if isVisible { QLPreviewPanel.shared().reloadData() } }
@@ -81,15 +104,6 @@ final class QuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
     func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! { selectedURL?() as NSURL? }
     func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
         guard event.type == .keyDown else { return false }
-        let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
-        let commandY = flags == .command && event.charactersIgnoringModifiers?.lowercased() == "y"
-        if (event.keyCode == 49 && flags.isEmpty) || event.keyCode == 53 || commandY {
-            if !event.isARepeat { close() }
-            return true
-        }
-        // Everything else (navigation, typing, shortcuts) belongs to the search panel.
-        let handled = onKey?(event) ?? false
-        refresh()
-        return handled
+        return onKey?(event) ?? false
     }
 }

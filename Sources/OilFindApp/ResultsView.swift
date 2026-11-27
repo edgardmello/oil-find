@@ -35,6 +35,7 @@ final class ResultCell: NSTableCellView {
         didSet { if compact != oldValue { applyStyle() } }
     }
     var textScale: CGFloat = 1 { didSet { if textScale != oldValue { applyStyle() } } }
+    var columnProportions: [CGFloat]? { didSet { if columnProportions != oldValue { needsLayout = true } } }
     private var configuration = 0
     private var displayingThumbnail = false
     override init(frame: NSRect) {
@@ -56,7 +57,7 @@ final class ResultCell: NSTableCellView {
             sizeLabel.isHidden = false
             icon.frame = NSRect(x: 14, y: 4, width: 16, height: 16)
             var x = CompactFileTable.iconWidth
-            for (label, width) in zip([nameLabel, pathLabel, sizeLabel, dateLabel], CompactFileTable.widths(for: bounds.width)) {
+            for (label, width) in zip([nameLabel, pathLabel, sizeLabel, dateLabel], CompactFileTable.widths(for: bounds.width, proportions: columnProportions)) {
                 label.frame = NSRect(x: x + 6, y: 4, width: max(0, width - 12), height: 16 * textScale)
                 x += width
             }
@@ -238,10 +239,20 @@ func resultRefreshAction(oldItems: [UInt32], newItems: [UInt32], sameStore: Bool
 }
 
 final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate {
+    override var acceptsFirstResponder: Bool { true }
     private let scroll = ResultScrollView()
     private let table = ResultTable()
     private let compactHeader = CompactFileHeader(stash: false)
     private(set) var compact = false
+    var columnProportions: [CGFloat]? {
+        didSet {
+            compactHeader.proportions = columnProportions
+            table.enumerateAvailableRowViews { view, _ in
+                (view.view(atColumn: 0) as? ResultCell)?.columnProportions = self.columnProportions
+            }
+        }
+    }
+    var onFinishColumnResize: (() -> Void)?
 
     private var textScale: CGFloat = 1
 
@@ -340,6 +351,8 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
         table.focusRingType = .none; table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("result")); column.resizingMask = .autoresizingMask
         table.addTableColumn(column); table.delegate = self; table.dataSource = self
+        compactHeader.onResize = { [weak self] in self?.columnProportions = $0 }
+        compactHeader.onFinishResize = { [weak self] in self?.onFinishColumnResize?() }
         table.target = self; table.doubleAction = #selector(doubleClicked)
         // Finder moves on the same volume, copies across volumes, copies with ⌥ and makes aliases with ⌥⌘.
         table.setDraggingSourceOperationMask([.copy, .move, .link, .generic], forLocal: false)
@@ -591,6 +604,7 @@ final class ResultsView: FlippedView, NSTableViewDataSource, NSTableViewDelegate
         let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? ResultCell ?? ResultCell(frame: .zero)
         cell.identifier = identifier
         cell.compact = compact
+        cell.columnProportions = columnProportions
         cell.textScale = textScale
         if let item = result?.additional(at: row), let result { cell.configure(item, query: result.query) }
         else if let item = item(at: row), let result { cell.configure(item, query: result.query, icons: icons) }

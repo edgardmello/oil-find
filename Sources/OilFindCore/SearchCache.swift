@@ -20,7 +20,7 @@ public final class SearchCache {
     }
 
     public func lookup(query: Query, options: SearchOptions, store: IndexStore) -> SearchResult? {
-        guard !query.isTimeDependent else { return nil }
+        guard !query.isTimeDependent, !query.hasMediaFilters else { return nil }
         return store.read {
             os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
             let now = clock()
@@ -34,7 +34,7 @@ public final class SearchCache {
     }
 
     public func insert(_ result: SearchResult) {
-        guard !result.query.isTimeDependent else { return }
+        guard !result.query.isTimeDependent, !result.query.hasMediaFilters else { return }
         result.store.read {
             os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
             let now = clock()

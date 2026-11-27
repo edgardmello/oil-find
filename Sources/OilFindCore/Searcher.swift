@@ -57,7 +57,7 @@ private struct DriverNeedle {
     var caseSensitive: Bool = false
 }
 private enum AtomTag: UInt8 {
-    case name, fuzzyName, path, glob, regex, ext, kind, filesOnly, foldersOnly, fileName, folderName, size, modified, tag, hidden, depth
+    case name, fuzzyName, path, glob, regex, ext, extendedExtension, kind, filesOnly, foldersOnly, fileName, folderName, size, modified, tag, hidden, depth
 }
 private struct ByteSpan {
     var bytes: UnsafePointer<UInt8>?
@@ -83,14 +83,36 @@ private struct HotAtom {
     var regexIndex: Int = 0
 }
 private struct ClauseRange { var start: Int; var count: Int }
+private enum IndexedFileType {
+    case kind(UInt8)
+    case extensions(FileExtensionMatcher)
+
+    init(_ type: ContainedFileType) {
+        switch type {
+        case .kind(let value): self = .kind(value)
+        case .extensions(let values): self = .extensions(FileExtensionMatcher(values))
+        }
+    }
+
+    func matches(_ id: Int, in store: IndexStore) -> Bool {
+        switch self {
+        case .kind(let value): return store.kind[id] == value
+        case .extensions(let matcher): return matcher.matches(name: store.nameBytes(UInt32(id)))
+        }
+    }
+}
+
 private final class SearchPlan {
     var atoms: [HotAtom] = []
     var clauses: [ClauseRange] = []
     var regexes: [NSRegularExpression] = []
+    var extensionMatchers: [FileExtensionMatcher] = []
     var drivers: [DriverNeedle]?
     var rootBytes: [UInt8] = []
     var allowedKinds: UInt16 = 0x1ff
     var requiredPath: UnsafePointer<UInt8>?
+    var foldersOnly = false
+    var cancelled = false
     var canBatchName: Bool {
         guard let first = atoms.first, first.tag == .name, !first.negated, first.length > 0,
               clauses.allSatisfy({ $0.count == 1 }) else { return false }
@@ -122,19 +144,49 @@ private final class SearchPlan {
         ownedKeys.append(pointer)
         return UnsafePointer(pointer)
     }
+    func adoptMask(_ pointer: UnsafeMutablePointer<UInt8>) -> UnsafePointer<UInt8> {
+        ownedMasks.append(pointer)
+        return UnsafePointer(pointer)
+    }
     func subtreeMask(store: IndexStore, path: String) -> UnsafePointer<UInt8> {
         let inside = UnsafeMutablePointer<UInt8>.allocate(capacity: store.count)
         inside.initialize(repeating: 0, count: store.count)
-        let rootIsDescendant = path == "/" || store.rootPath.hasPrefix(path + "/")
-        let folder = rootIsDescendant ? 0 : store.indexedID(forPath: path)
+        ownedMasks.append(inside)
+        guard path.hasPrefix("/") else { return UnsafePointer(inside) }
+        let folder: UInt32?
+        if path == "/" || store.rootPath.hasPrefix(path + "/") || path == store.rootPath {
+            folder = 0
+        } else if store.rootPath == "/" || path.hasPrefix(store.rootPath + "/") {
+            let relative = path.dropFirst(store.rootPath.count).precomposedStringWithCanonicalMapping
+            folder = store.indexedID(forPath: store.rootPath + relative)
+        } else {
+            folder = nil
+        }
         if let folder, store.flags[Int(folder)] & SiftFlag.dir != 0 {
             for i in (Int(folder) + 1)..<store.count {
                 let parent = store.parent[i]
                 inside[i] = parent == folder ? 1 : inside[Int(parent)]
             }
         }
-        ownedMasks.append(inside)
         return UnsafePointer(inside)
+    }
+    func containingFolders(store: IndexStore, fileType: ContainedFileType,
+                           matchingMedia: UnsafePointer<UInt8>?, isCancelled: () -> Bool) -> UnsafePointer<UInt8>? {
+        let matches = UnsafeMutablePointer<UInt8>.allocate(capacity: store.count)
+        matches.initialize(repeating: 0, count: store.count)
+        ownedMasks.append(matches)
+        if case .extensions(let values) = fileType, values.isEmpty { return UnsafePointer(matches) }
+        let predicate = IndexedFileType(fileType)
+        // Mark only the immediate parent. Entry IDs deduplicate folders at the same path.
+        for i in 1..<store.count {
+            if i & 4095 == 1 && isCancelled() { return nil }
+            guard store.flags[i] & (SiftFlag.dir | SiftFlag.deleted) == 0 else { continue }
+            let parent = Int(store.parent[i])
+            guard parent != 0, matches[parent] == 0,
+                  store.flags[parent] & (SiftFlag.dir | SiftFlag.deleted) == SiftFlag.dir else { continue }
+            if (matchingMedia == nil || matchingMedia![i] != 0) && predicate.matches(i, in: store) { matches[parent] = 1 }
+        }
+        return UnsafePointer(matches)
     }
     func savedPathMask(store: IndexStore, paths: [String], includeRoots: Bool) -> UnsafePointer<UInt8> {
         let inside = UnsafeMutablePointer<UInt8>.allocate(capacity: store.count)
@@ -225,6 +277,50 @@ private final class SearchScratch {
 }
 
 public enum Searcher {
+    private static func containedFileTypes(_ query: Query) -> [IndexedFileType] {
+        query.clauses.flatMap { clause in
+            clause.alternatives.compactMap { atom in
+                guard !atom.negated, case .contains(let type) = atom.matcher else { return nil }
+                return IndexedFileType(type)
+            }
+        }
+    }
+
+    /// List the immediate indexed files that contribute to a folder result.
+    public static func folderPreviewFiles(_ folder: UInt32, matching query: Query, in store: IndexStore,
+                                          isCancelled: () -> Bool = { false }) -> [String] {
+        if isCancelled() { return [] }
+        let types = containedFileTypes(query)
+        let filters = MediaFilters(query)
+        let (entries, version) = store.read { () -> ([(id: UInt32, name: String, candidate: MediaCandidate?)], UInt64) in
+            let index = Int(folder)
+            guard index < store.count, store.isLive(folder), store.flags[index] & SiftFlag.dir != 0 else { return ([], store.version) }
+            var entries: [(UInt32, String, MediaCandidate?)] = []
+            for id in (index + 1)..<store.count {
+                if id.isMultiple(of: 4096), isCancelled() { return ([], store.version) }
+                guard store.parent[id] == folder, store.flags[id] & (SiftFlag.dir | SiftFlag.deleted) == 0,
+                      types.isEmpty || types.contains(where: { $0.matches(id, in: store) }) else { continue }
+                let entry = UInt32(id)
+                if filters.isEmpty {
+                    entries.append((entry, store.name(entry), nil))
+                } else if MediaCandidate.supports(store.kind[id]) {
+                    entries.append((entry, store.name(entry), MediaCandidate(id: entry, path: store.path(entry), kind: store.kind[id])))
+                }
+            }
+            return (entries, store.version)
+        }
+        let names: [String]
+        if filters.isEmpty {
+            names = entries.map(\.name)
+        } else {
+            guard let ids = MediaGeometry.matching(entries.compactMap(\.candidate), filters: filters, isCancelled: isCancelled),
+                  store.read({ store.version == version }) else { return [] }
+            let matches = Set(ids)
+            names = entries.compactMap { matches.contains($0.id) ? $0.name : nil }
+        }
+        return names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     /// Evaluate existing query atoms against captured entries under one read lock.
     /// The callback is synchronous; predicate indexes correspond to the input atoms.
     public static func withEntryPredicates<T>(_ atoms: [Atom], options: SearchOptions = SearchOptions(), in store: IndexStore,
@@ -242,10 +338,81 @@ public enum Searcher {
         }
     }
 
-    public static func search(_ query: Query, options: SearchOptions = SearchOptions(), in store: IndexStore, previous: SearchResult? = nil, isCancelled: () -> Bool = { false }) -> SearchResult? {
-        let started = CFAbsoluteTimeGetCurrent()
+    public static func search(_ query: Query, options: SearchOptions = SearchOptions(), in store: IndexStore,
+                              previous: SearchResult? = nil, canReadMedia: Bool = true,
+                              isCancelled: () -> Bool = { false }) -> SearchResult? {
+        if query.hasMediaFilters && !query.hasContentTerms {
+            return searchMedia(query, options: options, store: store, canReadMedia: canReadMedia, isCancelled: isCancelled)
+        }
+        return searchIndex(query, options: options, store: store, previous: previous, isCancelled: isCancelled)
+    }
+
+    private static func searchMedia(_ query: Query, options: SearchOptions, store: IndexStore, canReadMedia: Bool,
+                                    isCancelled: () -> Bool) -> SearchResult? {
+        let began = CFAbsoluteTimeGetCurrent()
+        let filters = MediaFilters(query)
+        if !canReadMedia || filters.isInvalid {
+            return store.read {
+                SearchResult(store: store, query: query, options: options, items: [], total: 0,
+                             sortedCount: 0, elapsedMs: 0, scores: [])
+            }
+        }
+        let folders = query.searchesContainingFolders
+        var structural = query
+        structural.clauses.removeAll { clause in
+            clause.alternatives.contains {
+                if $0.isMediaFilter { return true }
+                if case .contains = $0.matcher { return $0.negated }
+                return false
+            }
+        }
+        if !folders {
+            structural.clauses.append(Clause(alternatives: [Atom(negated: false, matcher: .kind(4)),
+                                                            Atom(negated: false, matcher: .kind(5))]))
+        } else if !structural.searchesContainingFolders {
+            structural.clauses.append(Clause(alternatives: [Atom(negated: false, matcher: .foldersOnly)]))
+        }
+        guard let seeds = searchIndex(structural, options: options, store: store, isCancelled: isCancelled) else { return nil }
+        let types = containedFileTypes(query)
+        guard let (candidates, count) = store.read({ () -> ([MediaCandidate], Int)? in
+            guard seeds.storeVersion == store.version else { return nil }
+            var candidates: [MediaCandidate] = []
+            if folders {
+                var parents = [Bool](repeating: false, count: store.count)
+                for id in seeds.items { parents[Int(id)] = true }
+                for id in 1..<store.count {
+                    if id.isMultiple(of: 4096), isCancelled() { return nil }
+                    let kind = store.kind[id]
+                    guard parents[Int(store.parent[id])], MediaCandidate.supports(kind),
+                          store.flags[id] & (SiftFlag.dir | SiftFlag.deleted) == 0,
+                          types.isEmpty || types.contains(where: { $0.matches(id, in: store) }) else { continue }
+                    candidates.append(MediaCandidate(id: UInt32(id), path: store.path(UInt32(id)), kind: kind))
+                }
+            } else {
+                candidates.reserveCapacity(seeds.items.count)
+                for (offset, id) in seeds.items.enumerated() {
+                    if offset.isMultiple(of: 4096), isCancelled() { return nil }
+                    if store.flags[Int(id)] & SiftFlag.dir == 0 {
+                        candidates.append(MediaCandidate(id: id, path: store.path(id), kind: store.kind[Int(id)]))
+                    }
+                }
+            }
+            return (candidates, store.count)
+        }), let ids = MediaGeometry.matching(candidates, filters: filters, isCancelled: isCancelled) else { return nil }
+
+        var matches = [UInt8](repeating: 0, count: count)
+        for id in ids { matches[Int(id)] = 1 }
+        return matches.withUnsafeBufferPointer {
+            searchIndex(query, options: options, store: store, matchingMedia: $0.baseAddress,
+                        mediaVersion: seeds.storeVersion, started: began, isCancelled: isCancelled)
+        }
+    }
+
+    private static func searchIndex(_ query: Query, options: SearchOptions, store: IndexStore, previous: SearchResult? = nil,
+                                    matchingMedia: UnsafePointer<UInt8>? = nil, mediaVersion: UInt64? = nil,
+                                    started: CFAbsoluteTime = CFAbsoluteTimeGetCurrent(), isCancelled: () -> Bool) -> SearchResult? {
         return store.read {
-            if isCancelled() { return nil }
+            if isCancelled() || (mediaVersion != nil && mediaVersion != store.version) { return nil }
             if query.hasContentTerms {
                 return SearchResult(store: store, query: query, options: options, items: [], total: 0,
                                     sortedCount: 0, elapsedMs: (CFAbsoluteTimeGetCurrent() - started) * 1000,
@@ -254,7 +421,8 @@ public enum Searcher {
             if query.isEmpty { return recent(query, options: options, store: store, started: started, isCancelled: isCancelled) }
             let narrowed = previous.map { canNarrow(query, options: options, store: store, previous: $0) } ?? false
             let candidateCount = narrowed ? previous!.items.count : store.count - 1
-            let plan = makePlan(query, store: store, pinyin: options.pinyin)
+            let plan = makePlan(query, store: store, pinyin: options.pinyin, matchingMedia: matchingMedia, isCancelled: isCancelled)
+            if plan.cancelled { return nil }
             let cores = max(1, ProcessInfo.processInfo.activeProcessorCount)
             let chunkSize = narrowed ? 65536 : max(65536, store.count / (cores * 4))
             let chunkCount = max(0, (candidateCount + chunkSize - 1) / chunkSize)
@@ -404,10 +572,12 @@ public enum Searcher {
         return SearchResult(store: store, query: query, options: options, items: ids, total: ids.count, sortedCount: ids.count, elapsedMs: (CFAbsoluteTimeGetCurrent()-started)*1000, scores: [])
     }
 
-    private static func makePlan(_ query: Query, store: IndexStore, pinyin: Bool, preserveOrder: Bool = false) -> SearchPlan {
+    private static func makePlan(_ query: Query, store: IndexStore, pinyin: Bool, preserveOrder: Bool = false,
+                                 matchingMedia: UnsafePointer<UInt8>? = nil, isCancelled: () -> Bool = { false }) -> SearchPlan {
         let plan = SearchPlan()
         let rootComponents = store.rootPath.lowercased().split(separator: "/", omittingEmptySubsequences: false).map { Array($0.utf8) }
-        let clauses = preserveOrder ? query.clauses : query.clauses.sorted(by: { !$0.alternatives.contains(where: { $0.negated }) && $1.alternatives.contains(where: { $0.negated }) })
+        let indexedClauses = matchingMedia == nil ? query.clauses : query.clauses.filter { !$0.alternatives.contains(where: \.isMediaFilter) }
+        let clauses = preserveOrder ? indexedClauses : indexedClauses.sorted(by: { !$0.alternatives.contains(where: { $0.negated }) && $1.alternatives.contains(where: { $0.negated }) })
         for clause in clauses {
             let start = plan.atoms.count
             for atom in clause.alternatives {
@@ -443,6 +613,19 @@ public enum Searcher {
                         mask |= 1 << kind
                     }
                     hot.extKindMask = mask
+                case .extendedExtension(let values):
+                    hot.tag = .extendedExtension
+                    hot.lower = UInt64(plan.extensionMatchers.count)
+                    plan.extensionMatchers.append(FileExtensionMatcher(values))
+                case .contains(let fileType):
+                    hot.tag = .path
+                    plan.foldersOnly = true
+                    guard let mask = plan.containingFolders(store: store, fileType: fileType,
+                                                           matchingMedia: matchingMedia, isCancelled: isCancelled) else {
+                        plan.cancelled = true
+                        return plan
+                    }
+                    hot.pathMask = mask
                 case .kind(let k): hot.tag = .kind; hot.lower = UInt64(k)
                 case .filesOnly: hot.tag = .filesOnly
                 case .foldersOnly: hot.tag = .foldersOnly
@@ -450,7 +633,7 @@ public enum Searcher {
                 case .folderName(let n): hot.tag = .folderName; hot.bytes = plan.bytes(n); hot.length = n.count; hot.ascii = n.allSatisfy { $0 < 128 }
                 case .size(let r): hot.tag = .size; hot.lower = r.lowerBound; hot.upper = r.upperBound
                 case .modified(let r): hot.tag = .modified; hot.lower = UInt64(r.lowerBound); hot.upper = UInt64(r.upperBound)
-                case .tag, .content: hot.tag = .tag
+                case .tag, .content, .media: hot.tag = .tag
                 case .hidden: hot.tag = .hidden
                 case .depth(let depth):
                     hot.tag = .depth
@@ -472,6 +655,20 @@ public enum Searcher {
                 default: break
                 }
             }
+        }
+        if let matchingMedia {
+            let mask: UnsafePointer<UInt8>
+            if query.searchesContainingFolders {
+                let parents = UnsafeMutablePointer<UInt8>.allocate(capacity: store.count)
+                parents.initialize(repeating: 0, count: store.count)
+                for index in 1..<store.count where matchingMedia[index] != 0 { parents[Int(store.parent[index])] = 1 }
+                mask = plan.adoptMask(parents)
+            } else {
+                mask = matchingMedia
+            }
+            plan.clauses.append(ClauseRange(start: plan.atoms.count, count: 1))
+            plan.atoms.append(HotAtom(tag: .path, negated: false, pathMask: mask))
+            plan.requiredPath = mask
         }
         var drivers: [DriverNeedle]?, bestLength = 0
         for clause in query.clauses {
@@ -763,6 +960,7 @@ public enum Searcher {
     private static func evaluateHot(id: UInt32, atoms: UnsafePointer<HotAtom>, clauses: UnsafePointer<ClauseRange>, clauseCount: Int, plan: SearchPlan, options: SearchOptions, store: IndexStore, now: UInt32, scratch: SearchScratch, isCancelled: () -> Bool) -> Ranked? {
         let i = Int(id), flags = store.flags[i]
         if flags & SiftFlag.deleted != 0 { return nil }
+        if plan.foldersOnly && flags & SiftFlag.dir == 0 { return nil }
         if let kind = options.kind, store.kind[i] != kind { return nil }
         let scoreNeeded = options.sort == .relevance
         var baseSum = 0, baseCount = 0, needleLength = 0
@@ -878,6 +1076,8 @@ public enum Searcher {
             let key = Classifier.extensionKey(name)
             for j in 0..<atom.extCount { if atom.extKeys![j] == key { return AtomMatch(matched: true, baseScore: 0, needleLength: 0) } }
             return AtomMatch(matched: false, baseScore: 0, needleLength: 0)
+        case .extendedExtension:
+            return AtomMatch(matched: plan.extensionMatchers[Int(atom.lower)].matches(name: name), baseScore: 0, needleLength: 0)
         case .kind: return AtomMatch(matched: store.kind[i] == UInt8(atom.lower), baseScore: 0, needleLength: 0)
         case .filesOnly: return AtomMatch(matched: store.kind[i] != 1, baseScore: 0, needleLength: 0)
         case .foldersOnly: return AtomMatch(matched: store.kind[i] == 1, baseScore: 0, needleLength: 0)

@@ -3,14 +3,27 @@ import QuartzCore
 
 final class SearchEditor: NSTextView {
     var handleKey: ((NSEvent) -> Bool)?
+    var onPointerSelection: (() -> Void)?
+    override func mouseDown(with event: NSEvent) {
+        onPointerSelection?()
+        super.mouseDown(with: event)
+    }
+    var onFocus: (() -> Void)?
+    override func becomeFirstResponder() -> Bool {
+        guard super.becomeFirstResponder() else { return false }
+        onFocus?()
+        return true
+    }
     override func keyDown(with event: NSEvent) {
-        if !hasMarkedText(), handleKey?(event) == true { return }
-        super.keyDown(with: event)
+        if handleKey?(event) == true { return }
+        edit(with: event)
     }
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if !hasMarkedText(), handleKey?(event) == true { return true }
+        if handleKey?(event) == true { return true }
         return super.performKeyEquivalent(with: event)
     }
+    // A key already routed by the search controller still goes through AppKit's input context.
+    func edit(with event: NSEvent) { super.keyDown(with: event) }
 }
 
 private final class PassiveProgressIndicator: NSProgressIndicator {
@@ -161,6 +174,13 @@ final class SearchField: FlippedView, NSTextFieldDelegate {
     func focus(selectAll: Bool = false) {
         window?.makeFirstResponder(input)
         if selectAll { input.selectText(nil) }
+    }
+    func restoreEditing(selection: NSRange?) {
+        focus()
+        guard input.currentEditor() === editor else { return }
+        let length = editor.string.utf16.count
+        let location = min(selection?.location ?? length, length)
+        editor.selectedRange = NSRange(location: location, length: min(selection?.length ?? 0, length - location))
     }
     deinit { if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) } }
     func controlTextDidEndEditing(_ obj: Notification) { onSelectionChange?() }

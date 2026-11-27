@@ -50,7 +50,7 @@ public enum MultiSearcher {
                 guard let position = result.sources.firstIndex(where: { $0.id == source.id && $0.store === source.store }) else { return nil }
                 return result.results[position]
             }
-            slots[i] = Searcher.search(query, options: options, in: source.store, previous: old, isCancelled: isCancelled)
+            slots[i] = Searcher.search(query, options: options, in: source.store, previous: old, canReadMedia: source.isOnline, isCancelled: isCancelled)
             if let result = slots[i] { caches[source.id]?.insert(result) }
         }
         if sources.count == 1 { searchSource(0) }

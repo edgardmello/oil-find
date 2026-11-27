@@ -9,8 +9,9 @@ enum CompactFileTable {
     static let keys = ["name", "path", "size", "date"]
 
     // Keep the path wider than the name and reserve room for size and date on narrow panels.
-    static func widths(for width: CGFloat) -> [CGFloat] {
+    static func widths(for width: CGFloat, proportions: [CGFloat]? = nil) -> [CGFloat] {
         let available = max(0, width - iconWidth)
+        if let proportions { return proportions.map { $0 * available } }
         let date = min(220, floor(available * 0.27))
         let size = min(150, floor(available * 0.14))
         let name = floor((available - date - size) * 0.42)
@@ -34,6 +35,20 @@ enum CompactFileTable {
 final class CompactFileHeader: NSTableHeaderView {
     private let isStash: Bool
     var actionsMenu: (() -> NSMenu?)?
+    var onResize: (([CGFloat]) -> Void)?
+    var onFinishResize: (() -> Void)?
+    var proportions: [CGFloat]? { didSet { needsDisplay = true; window?.invalidateCursorRects(for: self) } }
+
+    private var columnWidths: [CGFloat] { CompactFileTable.widths(for: bounds.width, proportions: proportions) }
+    private var drag: (index: Int, x: CGFloat, widths: [CGFloat])?
+
+    private func dividerRects() -> [NSRect] {
+        var x = CompactFileTable.iconWidth
+        return columnWidths.dropLast().map { width in
+            x += width
+            return NSRect(x: x - 4, y: 0, width: 8, height: bounds.height)
+        }
+    }
 
     init(stash: Bool) {
         isStash = stash
@@ -66,7 +81,7 @@ final class CompactFileHeader: NSTableHeaderView {
         NSColor.separatorColor.setFill()
         NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1).fill()
         var x = CompactFileTable.iconWidth
-        for (key, width) in zip(CompactFileTable.keys, CompactFileTable.widths(for: bounds.width)) {
+        for (key, width) in zip(CompactFileTable.keys, columnWidths) {
             NSColor.separatorColor.setFill()
             NSRect(x: x, y: 6, width: 1, height: 16).fill()
             let title = L10n.text("stash.column." + key)
@@ -78,8 +93,32 @@ final class CompactFileHeader: NSTableHeaderView {
     // The headings describe the columns. Sorting continues to use the panel's sort controls.
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        if onResize != nil, let divider = dividerRects().firstIndex(where: { $0.contains(point) }) {
+            drag = (divider, point.x, columnWidths)
+            return
+        }
         guard point.x < CompactFileTable.iconWidth, let menu = actionsMenu?() else { return }
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
-    override func resetCursorRects() {}
+    override func mouseDragged(with event: NSEvent) {
+        guard let drag else { return }
+        var widths = drag.widths
+        let left = widths[drag.index], right = widths[drag.index + 1]
+        let delta = convert(event.locationInWindow, from: nil).x - drag.x
+        let change = min(max(delta, min(64, left) - left), right - min(64, right))
+        widths[drag.index] += change
+        widths[drag.index + 1] -= change
+        let total = widths.reduce(0, +)
+        if total > 0 { onResize?(widths.map { $0 / total }) }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if drag != nil { onFinishResize?() }
+        drag = nil
+    }
+
+    override func resetCursorRects() {
+        guard onResize != nil else { return }
+        for rect in dividerRects() { addCursorRect(rect, cursor: .resizeLeftRight) }
+    }
 }

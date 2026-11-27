@@ -10,7 +10,7 @@ resolve_signing_identity() {
         local installed="/Applications/Oil Find.app" work
         if [[ -d "$installed" ]]; then
             work="$(mktemp -d)"
-            if codesign -d --extract-certificates "$work/cert" "$installed" 2>/dev/null && [[ -f "$work/cert0" ]]; then
+            if codesign -d --extract-certificates="$work/cert" "$installed" 2>/dev/null && [[ -f "$work/cert0" ]]; then
                 SIGN_IDENTITY="$(shasum "$work/cert0" | cut -d ' ' -f 1 | tr '[:lower:]' '[:upper:]')"
             fi
             rm -rf "$work"

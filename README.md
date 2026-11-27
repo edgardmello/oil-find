@@ -53,12 +53,17 @@ In this personal build, ordinary text searches **file names**. To search **insid
 | `~/Desktop/ png` | Only under the Desktop |
 | `ext:pdf;docx` | By extension |
 | `kind:image` | By kind: folder, app, doc, image, video, audio, code, archive |
+| `kind:video orientation:portrait` | Match the displayed orientation: portrait, landscape, or square |
+| `kind:image ratio:4:3` | Match the exact displayed width-to-height ratio |
+| `contains:kind:video orientation:portrait` | Find folders with a portrait video directly inside |
 | `file:`, `folder:` | Files only, or folders only |
 | `size:>10mb`, `size:1mb..5mb` | By size |
 | `dm:today`, `dm:week`, `dm:2026-10-01` | By modification date |
 | `regex:^IMG_\d+` | Regular expressions |
 
 You can paste paths straight from a terminal or editor: `file://` URLs, quoted or escaped paths and paths ending in `:line:column` all work. Press ⌘/ in the search field for a syntax reference.
+
+Media filters use the displayed dimensions after applying rotation metadata. Combine them with file names, kinds, extensions, and folder scopes using spaces. For `contains:` queries, the side preview lists the files that match the media filter inside the selected folder.
 
 ## Keyboard
 

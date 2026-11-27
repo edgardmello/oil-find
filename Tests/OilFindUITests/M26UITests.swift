@@ -33,9 +33,10 @@ final class M26UITests: XCTestCase {
 }
 
 extension M26UITests {
-    private func key(_ code: UInt16, characters: String = "", flags: NSEvent.ModifierFlags = []) -> NSEvent {
-        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
-                        characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code)!
+    private func key(_ code: UInt16, characters: String = "", flags: NSEvent.ModifierFlags = [],
+                     time: TimeInterval = 0, repeatKey: Bool = false, windowNumber: Int = 0) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: time, windowNumber: windowNumber, context: nil,
+                        characters: characters, charactersIgnoringModifiers: characters, isARepeat: repeatKey, keyCode: code)!
     }
     func testRefreshKeepsPixelsIdentityAndNeighborDuringScrolling() throws {
         let (root, store, config) = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
@@ -140,11 +141,17 @@ extension M26UITests {
         XCTAssertTrue(controller.handleKey(space))
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         XCTAssertTrue(controller.quickLook.isVisible)
+        XCTAssertTrue(panel.firstResponder === controller.results)
         let previous = controller.results.selectedID
         XCTAssertTrue(controller.quickLook.previewPanel(nil, handle: key(125)))
         XCTAssertNotEqual(controller.results.selectedID, previous)
         XCTAssertEqual(controller.quickLook.selectedURL?()?.path, controller.results.selectedItem?.path)
+        let selected = controller.results.selectedID
         XCTAssertTrue(controller.quickLook.previewPanel(nil, handle: space))
+        XCTAssertEqual(controller.results.selectedID, selected)
+        XCTAssertTrue(panel.firstResponder === controller.results)
+        panel.keyDown(with: key(126))
+        XCTAssertEqual(controller.results.selectedID, previous)
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         XCTAssertFalse(controller.quickLook.isVisible)
         XCTAssertTrue(controller.handleKey(space))
@@ -155,9 +162,12 @@ extension M26UITests {
         XCTAssertTrue(controller.handleKey(key(16, characters: "y", flags: .command)))
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         XCTAssertTrue(controller.quickLook.isVisible)
-        controller.quickLook.close()
+        let commandY = key(16, characters: "y", flags: .command)
+        XCTAssertTrue(controller.quickLook.previewPanel(nil, handle: commandY))
+        XCTAssertFalse(controller.quickLook.isVisible)
+        XCTAssertTrue(panel.firstResponder === controller.results)
     }
-    func testQuickLookKeepsSearchFocusCaretAndIgnoresHeldKeys() throws {
+    func testQuickLookReturnsToResultsAndRestoresCaretOnTyping() throws {
         let (root, store, _) = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
         let panel = SearchPanel(snapshot: true)
         defer {
@@ -175,26 +185,99 @@ extension M26UITests {
         controller.searchField.editor.selectedRange = NSRange(location: 1, length: 0)
         XCTAssertFalse(controller.browsingResults)
         let commandY = key(16, characters: "y", flags: .command)
-        XCTAssertTrue(controller.handleKey(commandY))
+        XCTAssertTrue(controller.searchField.editor.performKeyEquivalent(with: commandY))
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         XCTAssertTrue(controller.quickLook.isVisible)
-        // The preview never takes over typing: the search field stays first responder.
-        XCTAssertTrue(panel.firstResponder === controller.searchField.editor)
-        let held = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: 0, context: nil,
-                                    characters: "y", charactersIgnoringModifiers: "y", isARepeat: true, keyCode: 16)!
+        XCTAssertTrue(panel.firstResponder === controller.results)
+        XCTAssertTrue(controller.browsingResults)
+        let held = key(16, characters: "y", flags: .command, repeatKey: true)
         XCTAssertTrue(controller.handleKey(held))
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         XCTAssertTrue(controller.quickLook.isVisible)
-        // Space dismisses an open preview even while typing in the field.
         XCTAssertTrue(controller.handleKey(key(49, characters: " ")))
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         XCTAssertFalse(controller.quickLook.isVisible)
         XCTAssertTrue(panel.isVisible)
-        XCTAssertTrue(panel.firstResponder === controller.searchField.editor)
-        XCTAssertEqual(controller.searchField.editor.selectedRange, NSRange(location: 1, length: 0))
+        XCTAssertTrue(panel.firstResponder === controller.results)
+        XCTAssertTrue(controller.browsingResults)
         XCTAssertEqual(controller.searchField.text, "row")
-        // With the preview closed, space types into the query again.
-        XCTAssertFalse(controller.handleKey(key(49, characters: " ")))
+
+        panel.keyDown(with: key(7, characters: "x"))
+        XCTAssertTrue(panel.firstResponder === controller.searchField.editor)
+        XCTAssertFalse(controller.browsingResults)
+        XCTAssertEqual(controller.searchField.text, "rxow")
+        XCTAssertEqual(controller.searchField.editor.selectedRange, NSRange(location: 2, length: 0))
+        controller.searchField.editor.keyDown(with: key(49, characters: " "))
+        XCTAssertEqual(controller.searchField.text, "rx ow")
+    }
+
+    func testQuickLookWindowClosePreservesSelectionAndEscapeSequence() throws {
+        let (root, store, _) = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+        let panel = SearchPanel(snapshot: true)
+        let controller = panel.searchController
+        defer {
+            controller.quickLook.close()
+            panel.close()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        }
+        var hides = 0
+        controller.hidePanel = { hides += 1 }
+        try controller.prepareSnapshot(state: "results", query: "row", options: .init(), store: store, selection: 0)
+        panel.makeKeyAndOrderFront(nil)
+        controller.searchField.focus()
+        controller.searchField.editor.selectedRange = NSRange(location: 1, length: 1)
+        let commandY = key(16, characters: "y", flags: .command)
+        XCTAssertTrue(controller.handleKey(commandY))
+        let preview = try XCTUnwrap(QLPreviewPanel.shared())
+        let closeButton = try XCTUnwrap(preview.standardWindowButton(.closeButton))
+        let selected = controller.results.selectedID
+        closeButton.performClick(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertFalse(controller.quickLook.isVisible)
+        XCTAssertEqual(controller.results.selectedID, selected)
+        XCTAssertTrue(panel.firstResponder === controller.results)
+        XCTAssertTrue(controller.handleKey(key(53, time: 1)))
+        XCTAssertEqual(hides, 0)
+        panel.keyDown(with: key(14, characters: "é"))
+        XCTAssertEqual(controller.searchField.text, "réw")
+        XCTAssertEqual(controller.searchField.editor.selectedRange, NSRange(location: 2, length: 0))
+
+        try controller.prepareSnapshot(state: "results", query: "row", options: .init(), store: store, selection: 0)
+        XCTAssertTrue(controller.handleKey(commandY))
+        XCTAssertTrue(controller.quickLook.isVisible)
+        NSApp.sendEvent(key(53, time: 2, windowNumber: preview.windowNumber))
+        XCTAssertFalse(controller.quickLook.isVisible)
+        XCTAssertEqual(hides, 0)
+        XCTAssertTrue(controller.handleKey(key(53, time: 2 + NSEvent.doubleClickInterval / 4, repeatKey: true)))
+        XCTAssertEqual(hides, 0)
+        XCTAssertTrue(controller.handleKey(key(53, time: 2 + NSEvent.doubleClickInterval / 2)))
+        XCTAssertEqual(hides, 1)
+    }
+
+    func testEscapeRequiresTwoDistinctConsecutiveTapsWithinInterval() throws {
+        let suite = "OilFindM26UI-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        StashShortcut.close.save(.init(keyCode: 2, modifiers: HotKey.carbonModifiers([.command, .shift])), in: defaults)
+        let controller = SearchViewController(snapshot: true, preferences: defaults)
+        _ = controller.view
+        var hides = 0
+        controller.hidePanel = { hides += 1 }
+        let half = NSEvent.doubleClickInterval / 2
+        XCTAssertTrue(controller.handleKey(key(53, time: 1)))
+        XCTAssertTrue(controller.handleKey(key(53, time: 1 + half, repeatKey: true)))
+        XCTAssertEqual(hides, 0)
+        XCTAssertFalse(controller.handleKey(key(7, characters: "x")))
+        XCTAssertTrue(controller.handleKey(key(53, time: 1 + half)))
+        XCTAssertEqual(hides, 0)
+        let expired = 2 + half + NSEvent.doubleClickInterval
+        XCTAssertTrue(controller.handleKey(key(53, time: expired)))
+        XCTAssertEqual(hides, 0)
+        XCTAssertTrue(controller.handleKey(key(53, time: expired + half)))
+        XCTAssertEqual(hides, 1)
+        XCTAssertFalse(controller.handleKey(key(13, characters: "w", flags: .command)))
+        XCTAssertTrue(controller.handleKey(key(2, characters: "d", flags: [.command, .shift])))
+        XCTAssertEqual(hides, 2)
     }
     func testExcludedTypesCommitNormalizationUndoRedoAndBlur() throws {
         _ = NSApplication.shared
