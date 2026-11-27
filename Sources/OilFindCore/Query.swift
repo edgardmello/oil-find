@@ -8,11 +8,13 @@ public struct Query {
     public private(set) var folderScope: String? = nil
     public func restricted(toFolder path: String) -> Query {
         var query = self
-        if query.folderScope != nil {
-            query.clauses.removeAll { clause in
-                guard clause.alternatives.count == 1, case .subtree = clause.alternatives[0].matcher else { return false }
-                return true
-            }
+        if let oldScope = query.folderScope,
+           let index = query.clauses.lastIndex(where: { clause in
+                guard clause.alternatives.count == 1, !clause.alternatives[0].negated,
+                      case .subtree(let path) = clause.alternatives[0].matcher else { return false }
+                return path == oldScope
+           }) {
+            query.clauses.remove(at: index)
         }
         query.folderScope = path
         query.clauses.append(Clause(alternatives: [Atom(negated: false, matcher: .subtree(path))]))
@@ -63,6 +65,10 @@ public struct Query {
     public var hasContentTerms: Bool {
         clauses.contains { $0.alternatives.contains { if case .content = $0.matcher { return true }; return false } }
     }
+    public var searchesContainingFolders: Bool {
+        clauses.contains { $0.alternatives.contains { if case .contains = $0.matcher { return true }; return false } }
+    }
+    public var hasMediaFilters: Bool { clauses.contains { $0.alternatives.contains(where: \.isMediaFilter) } }
     public var isTimeDependent: Bool {
         clauses.contains { clause in
             clause.alternatives.contains { atom in
@@ -109,7 +115,10 @@ public struct Query {
             guard !digits.isEmpty, digits.allSatisfy({ $0 >= "0" && $0 <= "9" }) else { break }
             end = colon
         }
-        if end != source.endIndex, source[..<end].split(separator: "/", omittingEmptySubsequences: false).last?.contains(".") == true {
+        if end != source.endIndex,
+           source[..<end].split(separator: "/", omittingEmptySubsequences: false).last?.contains(".") == true,
+           source.range(of: #"(^|[\s|])!?(contains|ratio):"#,
+                        options: [.regularExpression, .caseInsensitive]) == nil {
             source = String(source[..<end])
         }
         return source
@@ -125,8 +134,14 @@ public struct Query {
                              fuzzyNames: Bool = false, pathExists: ((String) -> Bool)? = nil) -> Query {
         let source = normalizePaste(text).precomposedStringWithCanonicalMapping
         var clauses: [Clause] = [], alts: [Atom] = [], diagnostics: [QueryDiagnostic] = []
+        var mediaRange: NSRange?
         func flushClause() {
+            defer { mediaRange = nil }
             guard !alts.isEmpty else { return }
+            if let range = mediaRange, alts.contains(where: { !$0.isMediaFilter }) {
+                let editing = editingRange.map { $0.location >= range.location && $0.location <= NSMaxRange(range) } ?? false
+                if !isComposing && !editing { diagnostics.append(QueryDiagnostic(kind: .mediaAlternatives, range: range)) }
+            }
             if alts.count == 1, !alts[0].negated {
                 let needle: [UInt8], filter: Matcher
                 switch alts[0].matcher {
@@ -172,6 +187,10 @@ public struct Query {
             return result
         }
         let tokens = wholePath ? [(body: source, range: NSRange(location: 0, length: source.utf16.count))] : tokenize(source)
+        let folderResults = !wholePath && tokens.contains {
+            let body = $0.body.lowercased()
+            return body.hasPrefix("contains:") || body.hasPrefix("!contains:")
+        }
         let originalTokens = tokenize(text)
         var originalCursor = 0
         var shorthandExtensions = Set<UInt64>()
@@ -225,12 +244,16 @@ public struct Query {
                 if wholePath { matcher = .path(components: pathComponents(body.lowercased(), home: home)) }
                 else if neg && body == "/" && !quoted { matcher = .foldersOnly }
                 else if let shorthand { matcher = .ext([shorthand]) }
-                else { matcher = parseMatcher(body, quoted: quoted, now: now, home: home, diagnostic: &diagnostic) }
+                else { matcher = parseMatcher(body, quoted: quoted, now: now, home: home, folderResults: folderResults, diagnostic: &diagnostic) }
                 if var d = diagnostic {
                     d.range = originalRange
                     let editing = editingRange.map { $0.location >= originalRange.location && $0.location <= NSMaxRange(originalRange) } ?? false
                     if !isComposing && !editing { diagnostics.append(d) }
+                    let atom = Atom(negated: false, matcher: matcher)
+                    if case .contains = matcher { alts.append(atom) }
+                    if atom.isMediaFilter { mediaRange = originalRange; alts.append(atom) }
                 } else {
+                    if case .media = matcher { mediaRange = originalRange }
                     let ordinary = !body.hasPrefix("'") && !body.contains(":") && !body.contains("/") && !body.hasPrefix("~") && !body.contains("*") && !body.contains("?")
                     var resolved = matcher
                     if fuzzyNames && ordinary && !neg, case .name(let needle, false) = matcher,
@@ -257,9 +280,13 @@ public struct Atom {
     public var excludesAncestors: Bool = false
     /// Quoted content terms require word boundaries; filename quoting is independent.
     public var contentWholeWords: Bool = false
+    var isMediaFilter: Bool {
+        if case .media = matcher { return true }
+        return false
+    }
 }
 public struct QueryDiagnostic: Equatable {
-    public enum Kind: String { case regex, kind, size, date, depth }
+    public enum Kind: String { case regex, kind, size, date, depth, contains, orientation, ratio, mediaAlternatives }
     public var kind: Kind
     public var value: String = ""
     public var range: NSRange = NSRange(location: 0, length: 0)
@@ -278,6 +305,9 @@ public enum Matcher {
     case glob(pattern: [UInt8], onPath: Bool)
     case regex(NSRegularExpression, onPath: Bool)
     case ext(Set<UInt64>)
+    case extendedExtension([String])
+    case contains(ContainedFileType)
+    case media(MediaGeometryFilter)
     case kind(UInt8)
     case filesOnly
     case foldersOnly
@@ -288,6 +318,17 @@ public enum Matcher {
     case tag(String)
     case content(String)
 }
+public enum ContainedFileType {
+    case kind(UInt8)
+    case extensions([String])
+}
+
+private func extensionValues(_ value: String) -> [String] {
+    value.split(separator: ";").filter {
+        !$0.utf8.contains(where: { $0 == 0 || $0 == 46 || $0 == 47 })
+    }.map { $0.lowercased().precomposedStringWithCanonicalMapping }
+}
+
 private func extKey(_ s: String) -> UInt64? {
     let b = Array(s.lowercased().utf8); guard (1...8).contains(b.count), b.allSatisfy({ $0 < 128 }) else { return nil }
     return b.reduce(0) { ($0 << 8) | UInt64($1) }
@@ -298,7 +339,7 @@ private func shorthandExtension(_ text: String) -> UInt64? {
     guard suffix.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) }) else { return nil }
     return extKey(String(suffix))
 }
-private func parseMatcher(_ body: String, quoted: Bool, now: Date, home: String, diagnostic: inout QueryDiagnostic?) -> Matcher {
+private func parseMatcher(_ body: String, quoted: Bool, now: Date, home: String, folderResults: Bool, diagnostic: inout QueryDiagnostic?) -> Matcher {
     let lower = body.lowercased()
     if body.hasPrefix("'"), body.count > 1 {
         return .name(needle: Array(lower.dropFirst().utf8), caseSensitive: false)
@@ -307,8 +348,38 @@ private func parseMatcher(_ body: String, quoted: Bool, now: Date, home: String,
         let key = body[..<colon].lowercased(), value = String(body[body.index(after: colon)...])
         switch key {
         case "ext":
-            let parts = value.split(separator: ";").compactMap { extKey(String($0)) }
-            if !parts.isEmpty { return .ext(Set(parts)) }
+            let parts = value.split(separator: ";")
+            let keys = parts.compactMap { extKey(String($0)) }
+            if keys.count != parts.count {
+                let extensions = extensionValues(value)
+                if extensions.contains(where: { extKey($0) == nil }) { return .extendedExtension(extensions) }
+            }
+            if !keys.isEmpty { return .ext(Set(keys)) }
+        case "contains":
+            if lower.hasPrefix("contains:kind:"),
+               let i = Query.kindNames.firstIndex(of: String(lower.dropFirst("contains:kind:".count))) {
+                return .contains(.kind(UInt8(i + 1)))
+            }
+            if lower.hasPrefix("contains:ext:") {
+                let extensions = extensionValues(String(value.dropFirst("ext:".count)))
+                if !extensions.isEmpty { return .contains(.extensions(extensions)) }
+            }
+            diagnostic = QueryDiagnostic(kind: .contains)
+            return .contains(.extensions([]))
+        case "orientation":
+            switch value.lowercased() {
+            case "portrait": return .media(.portrait)
+            case "landscape": return .media(.landscape)
+            case "square": return .media(.square)
+            default: diagnostic = QueryDiagnostic(kind: .orientation); return .media(.invalid)
+            }
+        case "ratio":
+            let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+            if parts.count == 2, let width = UInt32(parts[0]), let height = UInt32(parts[1]), width > 0, height > 0 {
+                return .media(.ratio(width: width, height: height))
+            }
+            diagnostic = QueryDiagnostic(kind: .ratio)
+            return .media(.invalid)
         case "kind":
             if let i = Query.kindNames.firstIndex(of: value.lowercased()) { return .kind(UInt8(i + 1)) }
             diagnostic = QueryDiagnostic(kind: .kind)
@@ -317,6 +388,10 @@ private func parseMatcher(_ body: String, quoted: Bool, now: Date, home: String,
         case "size": if let range = parseSize(value) { return .size(range) }; diagnostic = QueryDiagnostic(kind: .size)
         case "dm", "modified": if let range = parseDate(value, now: now) { return .modified(range) }; diagnostic = QueryDiagnostic(kind: .date)
         case "in" where !value.isEmpty:
+            if folderResults, value.hasPrefix("/") || value.hasPrefix("~/") || value == "~" {
+                let absolute = value.hasPrefix("~") ? home + value.dropFirst() : value
+                if let path = ExcludedFolders.normalized(absolute) { return .subtree(path) }
+            }
             let path = value.hasSuffix("/") ? value : value + "/"
             return .path(components: pathComponents(path.lowercased(), home: home))
         case "depth":

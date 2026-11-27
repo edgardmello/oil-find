@@ -87,8 +87,50 @@ private final class WindowFade: NSAnimation, NSAnimationDelegate {
     func animationDidEnd(_ animation: NSAnimation) { window?.alphaValue = endAlpha; completion?() }
 }
 
+/// Borderless search windows need their own resize hit areas.
+final class SearchWindowResizeEdges: FlippedView {
+    private static let edge: CGFloat = 7
+    private var start: (point: NSPoint, size: NSSize, horizontal: Bool, vertical: Bool)?
+
+    private var rightEdge: NSRect {
+        NSRect(x: bounds.maxX - Self.edge, y: 0, width: Self.edge, height: bounds.height)
+    }
+    private var bottomEdge: NSRect {
+        NSRect(x: 0, y: bounds.maxY - Self.edge, width: bounds.width, height: Self.edge)
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden else { return nil }
+        let local = convert(point, from: superview)
+        return rightEdge.contains(local) || bottomEdge.contains(local) ? self : nil
+    }
+    override func resetCursorRects() {
+        guard !isHidden else { return }
+        addCursorRect(rightEdge, cursor: .resizeLeftRight)
+        addCursorRect(bottomEdge, cursor: .resizeUpDown)
+    }
+    override func mouseDown(with event: NSEvent) {
+        guard let window else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        start = (window.convertPoint(toScreen: event.locationInWindow), window.frame.size,
+                 rightEdge.contains(point), bottomEdge.contains(point))
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let panel = window as? SearchPanel, let start else { return }
+        let point = panel.convertPoint(toScreen: event.locationInWindow)
+        panel.resizeFromUser(to: NSSize(width: start.size.width + (start.horizontal ? point.x - start.point.x : 0),
+                                       height: start.size.height + (start.vertical ? start.point.y - point.y : 0)))
+    }
+    override func mouseUp(with event: NSEvent) {
+        if start != nil { (window as? SearchPanel)?.rememberSize() }
+        start = nil
+    }
+}
+
 final class SearchPanel: NSPanel {
     static let collapsedHeight: CGFloat = 64
+    private static let sizeKey = "searchWindowSize"
+    private static let minimumSearchSize = NSSize(width: 640, height: 400)
+    private var customSize: NSSize?
     private static let positionKey = "searchWindowTopLeft"
     let searchController: SearchViewController
     private let snapshot: Bool
@@ -103,6 +145,10 @@ final class SearchPanel: NSPanel {
         searchController = SearchViewController(snapshot: snapshot)
         self.snapshot = snapshot
         if !snapshot, let saved = UserDefaults.standard.string(forKey: Self.positionKey) { customTopLeft = NSPointFromString(saved) }
+        if !snapshot, let saved = UserDefaults.standard.string(forKey: Self.sizeKey) {
+            let size = NSSizeFromString(saved)
+            if size.width.isFinite && size.height.isFinite && size.width > 0 && size.height > 0 { customSize = size }
+        }
         super.init(contentRect: NSRect(origin: .zero, size: Theme.panelSize), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         level = .floating; collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         isMovable = false; hidesOnDeactivate = false; isOpaque = false; backgroundColor = .clear; hasShadow = true
@@ -126,25 +172,42 @@ final class SearchPanel: NSPanel {
         } else {
             target = screen
         }
-        guard let screen = target ?? NSScreen.main else { return }
+        let savedScreen = searchController.searchInterface == .window ? customTopLeft.flatMap { corner in
+            NSScreen.screens.first { $0.visibleFrame.contains(NSPoint(x: corner.x + 1, y: corner.y - 1)) }
+        } : nil
+        guard let screen = savedScreen ?? target ?? NSScreen.main else { return }
         let visible = screen.visibleFrame
-        let size = searchController.searchInterface.expandedSize(preview: searchController.inlinePreviewVisible && !searchController.barCollapsed)
-        let width = min(size.width, visible.width - 80)
-        let expandedHeight = min(size.height, visible.height - 120)
+        let defaultSize = searchController.searchInterface.expandedSize(preview: searchController.inlinePreviewVisible && !searchController.barCollapsed)
+        let size = (searchController.searchInterface == .window ? customSize : nil) ?? defaultSize
+        let usingCustomSize = searchController.searchInterface == .window && customSize != nil
+        let width = min(size.width, visible.width - (usingCustomSize ? 0 : 80))
+        let expandedHeight = min(size.height, visible.height - (usingCustomSize ? 0 : 120))
         let height = searchController.barCollapsed ? Self.collapsedHeight : expandedHeight
         let top = (visible.midY + expandedHeight / 2).rounded()
         var frame = NSRect(x: (visible.midX - width / 2).rounded(), y: top - height,
                            width: width, height: height)
-        if searchController.searchInterface == .window, let custom = customTopLeft,
-           let home = NSScreen.screens.first(where: { $0.visibleFrame.contains(NSPoint(x: custom.x + 1, y: custom.y - 1)) }) {
+        if let custom = customTopLeft, let savedScreen {
             // Keep the dragged corner, but never let the window spill off the screen it was left on.
-            let area = home.visibleFrame
+            let area = savedScreen.visibleFrame
             let x = min(max(custom.x, area.minX), area.maxX - width)
             let top = min(max(custom.y, area.minY + height), area.maxY)
             frame = NSRect(x: x.rounded(), y: (top - height).rounded(), width: width, height: height)
         }
         setFrame(frame, display: display)
         invalidateShadow()
+    }
+    func resizeFromUser(to size: NSSize) {
+        guard searchController.searchInterface == .window, let area = (screen ?? NSScreen.main)?.visibleFrame else { return }
+        let width = min(max(size.width, Self.minimumSearchSize.width), area.maxX - frame.minX)
+        let height = min(max(size.height, Self.minimumSearchSize.height), frame.maxY - area.minY)
+        guard width > 0 && height > 0 else { return }
+        setFrame(NSRect(x: frame.minX, y: frame.maxY - height, width: width, height: height), display: true)
+        customSize = frame.size
+    }
+    func rememberSize() {
+        guard let customSize, !snapshot else { return }
+        UserDefaults.standard.set(NSStringFromSize(customSize), forKey: Self.sizeKey)
+        rememberPosition()
     }
     func rememberPosition() {
         customTopLeft = NSPoint(x: frame.minX, y: frame.maxY)

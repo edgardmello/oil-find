@@ -6,7 +6,7 @@ import OilFindCore
 private final class SupplementarySearchBox { var hits: [SupplementaryHit] = [] }
 private final class AdditionalSearchBox { var items: [AdditionalSearchItem] = []; var failed = false; var elapsedMs: Double = 0 }
 
-private final class SearchGeneration {
+final class SearchGeneration {
     private let lock = NSLock()
     private var value = 0
     func next() -> Int { lock.lock(); defer { lock.unlock() }; value += 1; return value }
@@ -34,6 +34,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private let preferences: UserDefaults
     private(set) var searchInterface: SearchInterface = .window
     let panelBody = FlippedView()
+    private let resizeEdges = SearchWindowResizeEdges()
     private var searchHintTimer: Timer?
     private var searchHintIndex = 0
     private var lastHiddenAt: Date?
@@ -70,12 +71,13 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     private var additionalSearchFailed = false
     private var additionalPending = false
     private var pendingNewSearch: Bool?
-    private var pendingContentSources: [SearchSource]?
+    private var pendingMetadataSources: [SearchSource]?
     private(set) var browsingResults = false
     var previewWithSpace: Bool { preferences.object(forKey: "previewWithSpace") as? Bool ?? true }
     private var spaceOpensQuickLook: Bool { browsingResults && previewWithSpace && !inlinePreviewVisible }
     private func setBrowsing(_ browsing: Bool) {
         browsingResults = browsing
+        if !browsing { inlinePreview.leaveFolderFiles() }
         footer.spacePreview = spaceOpensQuickLook
     }
     var manager: IndexManager?
@@ -196,6 +198,15 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     override func loadView() { view = PanelSurface(snapshot: snapshot) }
     override func viewDidLoad() {
         super.viewDidLoad()
+        if !snapshot, let widths = preferences.array(forKey: "searchResultColumns") as? [Double],
+           widths.count == CompactFileTable.keys.count, widths.allSatisfy({ $0.isFinite && $0 > 0 }),
+           abs(widths.reduce(0, +) - 1) < 0.001 {
+            results.columnProportions = widths.map { CGFloat($0) }
+        }
+        results.onFinishColumnResize = { [weak self] in
+            guard let self, !self.snapshot else { return }
+            self.preferences.set(self.results.columnProportions?.map { Double($0) }, forKey: "searchResultColumns")
+        }
         [topLine, filters, results, empty, indexing, bottomLine, footer, inlinePreview, accessories, syntaxScroll, tiles].forEach(panelBody.addSubview)
         tiles.onSelect = { [weak self] filter in self?.toggleLibraryFilter(filter) }
         panelBody.addSubview(titleBar)
@@ -213,6 +224,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         filters.onToolStateChange = { [weak self] in self?.refreshFieldTools() }
         view.addSubview(panelBody)
         view.addSubview(searchField)
+        view.addSubview(resizeEdges)
         syntaxScroll.drawsBackground = false
         syntaxScroll.hasVerticalScroller = true
         syntaxScroll.autohidesScrollers = true
@@ -228,6 +240,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             guard let self else { return }; self.setBrowsing(false); self.searchField.text = example; self.toggleSyntax(false); self.searchField.focus(); self.startSearch()
         }
         searchField.onSelectionChange = { [weak self] in self?.refreshDiagnostics() }
+        searchField.editor.onPointerSelection = { [weak self] in self?.setBrowsing(false) }
         searchField.onChange = { [weak self] in self?.setBrowsing(false); self?.startSearch() }
         searchField.onKey = { [weak self] event in self?.handleKey(event) ?? false }
         filters.onChange = { [weak self] in self?.scopeChanged(resetAdditional: false) }
@@ -246,11 +259,14 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             if !tracking { self?.hideIfInactive() }
         }
         if !snapshot { results.currentSource = { [weak self] id in self?.searchSources.first { $0.id == id } } }
-        results.onPointerSelection = { [weak self] in self?.setBrowsing(true) }
+        results.onPointerSelection = { [weak self] in
+            self?.inlinePreview.leaveFolderFiles()
+            self?.setBrowsing(true)
+        }
         results.onOpen = { [weak self] in self?.openSelected() }
         results.onSelection = { [weak self] in
-            self?.quickLook.refresh()
             self?.refreshInlinePreview()
+            self?.quickLook.refresh()
             self?.refreshApplicationSuggestions()
             self?.footer.fileActions = self?.results.selectedAdditional == nil
             if let self, let item = self.results.selectedItem {
@@ -285,7 +301,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
         quickLook.selectedURL = { [weak self] in
             guard let self, self.results.selectedItem?.source.isOnline == true else { return nil }
-            return self.selectedURL
+            return self.activePreviewURL
         }
         quickLook.onWillOpen = { [weak self] in self?.rememberFocus() }
         quickLook.onReclaimFocus = { [weak self] in self?.restoreFocus() }
@@ -299,6 +315,15 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
         quickLook.onKey = { [weak self] event in self?.forwardPreviewKey(event) ?? false }
         inlinePreview.onClose = { [weak self] in self?.toggleInlinePreview() }
+        inlinePreview.onFolderFileSelection = { [weak self] in
+            guard let self else { return }
+            if self.inlinePreview.selectedFolderFileURL != nil {
+                self.setBrowsing(true)
+                self.restoreFocus()
+            }
+            self.quickLook.refresh()
+        }
+        inlinePreview.onOpenFolderFile = { [weak self] in self?.openFolderPreviewFile($0) }
         footer.onInlinePreview = { [weak self] in self?.toggleInlinePreview() }
         footer.onActions = { [weak self] anchor in self?.showActions(anchoredTo: anchor) }
         footer.onStash = { [weak self] in self?.toggleStash() }
@@ -328,6 +353,8 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     override func viewDidLayout() {
         super.viewDidLayout()
         let w = view.bounds.width, h = view.bounds.height, px = Theme.pixel(view)
+        resizeEdges.isHidden = !windowChrome || barCollapsed
+        resizeEdges.frame = view.bounds
         searchField.showExpand = barCollapsed
         if barCollapsed {
             searchField.frame = NSRect(x: 0, y: 0, width: w, height: h)
@@ -712,6 +739,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         activeLibraryFilter = nil
         savedCriteria = nil
         folderScope = item.flags & SiftFlag.dir != 0 ? item.path : item.parentPath
+        if results.result?.query.searchesContainingFolders == true { filters.options.kind = nil }
         searchField.text = ""
         scopeChanged()
     }
@@ -948,7 +976,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
            (result.single != nil || result.multiple != nil || sources.isEmpty),
            result.query.raw == currentQuery.raw, result.query.folderScope == currentQuery.folderScope,
            result.query.savedCriteria == currentQuery.savedCriteria,
-           result.query.hiddenOnly == currentQuery.hiddenOnly, result.query.fuzzyNames == currentQuery.fuzzyNames, !currentQuery.isTimeDependent,
+           result.query.hiddenOnly == currentQuery.hiddenOnly, result.query.fuzzyNames == currentQuery.fuzzyNames, !currentQuery.isTimeDependent, !currentQuery.hasMediaFilters,
            Date().timeIntervalSince(result.createdAt) <= 600 { return }
         startSearch(preserveSelection: true)
     }
@@ -980,9 +1008,9 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         search(refresh: false, preserveSelection: preserveSelection)
     }
     private func refreshSearch() {
-        // Unrelated filesystem events must not repeatedly cancel an explicit content query.
-        // Source replacement/disconnection still invalidates work immediately.
-        if supplementaryProvider?.isEnabled == true, let pending = pendingContentSources {
+        // Keep an in-flight metadata lookup across events; validate its index version before publishing.
+        // Source replacement or disconnection still invalidates it immediately.
+        if let pending = pendingMetadataSources {
             let current = scopedSources
             if pending.count == current.count && zip(pending, current).allSatisfy({
                 $0.id == $1.id && $0.store === $1.store && $0.isOnline == $1.isOnline
@@ -997,17 +1025,17 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             search(refresh: true, preserveSelection: false)
         }
     }
-    private func retryContentSearch(_ token: Int) {
+    private func retryMetadataSearch(_ token: Int) {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.generation.current(token) else { return }
-            self.pendingContentSources = nil
+            self.pendingMetadataSources = nil
             self.refreshSearch()
         }
     }
     private func search(refresh: Bool, preserveSelection: Bool) {
         supplementaryProvider?.userActivity(visible: view.window?.isVisible == true, typing: !refresh && !preserveSelection)
         let token = generation.next()
-        pendingContentSources = nil
+        pendingMetadataSources = nil
         let additionalOnly = filters.additionalSelected
         let sources = additionalOnly ? [] : scopedSources
         if !snapshot && filters.options.sortsRecentResults != sortingRecent {
@@ -1047,15 +1075,16 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         }
         let previous = results.result
         let cancelled = { [generation] in !generation.current(token) }
-        let supplementary = additionalOnly ? nil : supplementaryProvider?.prepareSearch(query, options: options, sources: sources, isCancelled: cancelled)
-        pendingContentSources = query.hasContentTerms && supplementary != nil ? sources : nil
+        let indexedResultsOnly = query.searchesContainingFolders || query.hasMediaFilters
+        let supplementary = additionalOnly || indexedResultsOnly ? nil : supplementaryProvider?.prepareSearch(query, options: options, sources: sources, isCancelled: cancelled)
+        pendingMetadataSources = !sources.isEmpty && (query.hasMediaFilters || query.hasContentTerms && supplementary != nil) ? sources : nil
         #if DEBUG
         if query.hasContentTerms {
             AppLog.logger.info("Content query submitted: provider=\(self.supplementaryProvider != nil) enabled=\(self.supplementaryProvider?.isEnabled == true) sources=\(sources.count)")
         }
         #endif
         let additional = additionalSearchProvider.flatMap { provider in
-            provider.isEnabled && (additionalOnly || options.kind == nil && folderScope == nil && savedCriteria == nil && activeLibraryFilter == nil && volumeScope == nil && !hiddenOnly) ? provider.prepareSearch(query, isCancelled: cancelled) : nil
+            provider.isEnabled && !indexedResultsOnly && (additionalOnly || options.kind == nil && folderScope == nil && savedCriteria == nil && activeLibraryFilter == nil && volumeScope == nil && !hiddenOnly) ? provider.prepareSearch(query, isCancelled: cancelled) : nil
         }
         additionalSearchFailed = false
         additionalPending = !refresh && additional != nil
@@ -1099,7 +1128,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                 if previous?.single?.store !== store { self.cache.removeAll() }
                 guard let result = self.cache.lookup(query: query, options: options, store: store)
                     ?? Searcher.search(query, options: options, in: store, previous: previous?.single, isCancelled: { !self.generation.current(token) }), self.generation.current(token) else {
-                    if query.hasContentTerms { self.retryContentSearch(token) }
+                    if query.hasContentTerms || query.hasMediaFilters { self.retryMetadataSearch(token) }
                     return
                 }
                 self.cache.insert(result); found = SearchPresentation(result)
@@ -1114,7 +1143,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                     }
                 }
                 guard let result = MultiSearcher.search(query, options: options, in: sources, previous: previous?.multiple, caches: self.sourceCaches, isCancelled: { !self.generation.current(token) }), self.generation.current(token) else {
-                    if query.hasContentTerms { self.retryContentSearch(token) }
+                    if query.hasContentTerms || query.hasMediaFilters { self.retryMetadataSearch(token) }
                     return
                 }
                 found = SearchPresentation(result)
@@ -1124,6 +1153,10 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             let deferNames = sources.isEmpty && additional != nil || previous?.query.raw == query.raw && ((refresh || preserveSelection) && (previous?.hasAdditional == true || previous?.hasSupplements == true) || anchor != nil && anchoredRow == nil && supplementary != nil)
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation.current(token) else { return }
+                if query.hasMediaFilters {
+                    self.pendingMetadataSources = nil
+                    guard found.isCurrent(sources) else { self.refreshSearch(); return }
+                }
                 self.diagnostics = query.diagnostics
                 if deferNames { return }
                 if refresh {
@@ -1149,7 +1182,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                         guard let self, self.generation.current(token) else { return }
                         self.pendingNewSearch = nil; self.additionalPending = false; self.additionalSearchFailed = additionalBox.failed
                         self.refreshProgress()
-                        if query.hasContentTerms { self.pendingContentSources = nil }
+                        if query.hasContentTerms { self.pendingMetadataSources = nil }
                         guard combined.isCurrent(self.scopedSources) else {
                             if query.hasContentTerms { self.refreshSearch() }
                             return
@@ -1303,10 +1336,12 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
             setState(.indexing); indexing.updateCount(1_234_567); searchField.indexing = true
             footer.text = L10n.text("footer.indexing", Presentation.countText(1_234_567)); return
         }
-        if additionalOnly || additionalSearchProvider?.isEnabled == true || supplementaryProvider?.isEnabled == true {
+        let parsed = Query.parse(searchField.text, store: store)
+        let indexedResultsOnly = parsed.searchesContainingFolders || parsed.hasMediaFilters
+        if additionalOnly || !indexedResultsOnly && (additionalSearchProvider?.isEnabled == true || supplementaryProvider?.isEnabled == true) {
             if additionalOnly { filters.select(FilterBar.names.count, notify: false); refreshAdditionalFilter() }
             _ = generation.next(); pendingNewSearch = nil
-            let query = Query.parse(searchField.text, store: store)
+            let query = parsed
             let sources = additionalOnly ? [] : store.map { [SearchSource(id: "startup", displayName: "", isOnline: true, store: $0)] + additionalSources } ?? additionalSources
             let files: SearchPresentation
             if sources.isEmpty { files = SearchPresentation(query: query) }
@@ -1315,21 +1350,21 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
                 files = hits.isEmpty ? SearchPresentation(found) : SearchPresentation(found).supplement(hits, options: options)
             } else { throw SnapshotError.failed("Cannot search snapshot index") }
             let began = CFAbsoluteTimeGetCurrent()
-            let items = additionalOnly || options.kind == nil ? try additionalSearchProvider?.prepareSearch(query, isCancelled: { false })() ?? [] : []
+            let items = !indexedResultsOnly && (additionalOnly || options.kind == nil) ? try additionalSearchProvider?.prepareSearch(query, isCancelled: { false })() ?? [] : []
             diagnostics = query.diagnostics; present(files.including(items, options: options, elapsedMs: (CFAbsoluteTimeGetCurrent() - began) * 1000), selection: selection); return
         }
-        if let store, let supplementaryProvider {
+        if !indexedResultsOnly, let store, let supplementaryProvider {
             let sources = [SearchSource(id: "startup", displayName: "", isOnline: true, store: store)] + additionalSources
-            let query = Query.parse(searchField.text, store: store)
+            let query = parsed
             let hits = supplementaryProvider.prepareSearch(query, options: options, sources: sources, isCancelled: { false })()
             guard let found = MultiSearcher.search(query, options: options, in: sources) else { throw SnapshotError.failed("Cannot search snapshot index") }
             diagnostics = query.diagnostics; present(SearchPresentation(found).supplement(hits, options: options), selection: selection); return
         }
-        if let store, !additionalSources.isEmpty, let found = MultiSearcher.search(Query.parse(searchField.text, store: store), options: options, in: [SearchSource(id: "startup", displayName: "", isOnline: true, store: store)] + additionalSources) {
+        if let store, !additionalSources.isEmpty, let found = MultiSearcher.search(parsed, options: options, in: [SearchSource(id: "startup", displayName: "", isOnline: true, store: store)] + additionalSources) {
             diagnostics = found.query.diagnostics; present(SearchPresentation(found), selection: selection); return
         }
-        guard let store, let found = Searcher.search(Query.parse(searchField.text, store: store), options: options, in: store) else { throw SnapshotError.failed("Cannot search snapshot index") }
-        diagnostics = Query.parse(searchField.text, store: store).diagnostics
+        guard let store, let found = Searcher.search(parsed, options: options, in: store) else { throw SnapshotError.failed("Cannot search snapshot index") }
+        diagnostics = parsed.diagnostics
         snapshotNoAccess = state == "no-access"
         present(found, selection: selection)
         if state == "syntax" { toggleSyntax(true) }
@@ -1439,10 +1474,35 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         if action == .escape {
             if syntaxVisible { toggleSyntax(false) }
             else if quickLook.isVisible { quickLook.close() }
+            else if inlinePreview.selectedFolderFileURL != nil { inlinePreview.leaveFolderFiles() }
             else { hidePanel?() }
             return true
         }
         if syntaxVisible { return false }
+        if chord.modifiers == 0 && event.keyCode == 124 && browsingResults && inlinePreview.enterFolderFiles() {
+            return true
+        }
+        if let file = inlinePreview.selectedFolderFileURL {
+            if chord.modifiers == 0 && event.keyCode == 123 {
+                quickLook.close()
+                inlinePreview.leaveFolderFiles()
+                return true
+            }
+            if chord.modifiers == 0 && event.keyCode == 49 {
+                if !event.isARepeat {
+                    if quickLook.isVisible || !inlinePreview.toggleFilePlayback() { previewSelected() }
+                }
+                return true
+            }
+            switch action {
+            case .up: inlinePreview.moveFolderFile(by: -1); return true
+            case .down: inlinePreview.moveFolderFile(by: 1); return true
+            case .open:
+                if !event.isARepeat { openFolderPreviewFile(file) }
+                return true
+            default: break
+            }
+        }
         if event.keyCode == 49 && chord.modifiers == 0 && (quickLook.isVisible || spaceOpensQuickLook) {
             if !event.isARepeat { previewSelected() }
             return true
@@ -1597,10 +1657,21 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
         let online = item.source.isOnline && (snapshot || searchSources.contains {
             $0.id == item.source.id && $0.isOnline && $0.store === item.source.store
         })
+        let directory = item.flags & SiftFlag.dir != 0
+        let folder = directory && online ? results.result.map {
+            InlinePreview.Folder(item: item, query: $0.query)
+        } : nil
         inlinePreview.update(url: online ? URL(fileURLWithPath: item.path) : nil,
-                             isDirectory: item.flags & SiftFlag.dir != 0, isUnavailable: !online,
+                             folder: folder, isUnavailable: !online,
                              metadata: (item.flags & SiftFlag.dir != 0 ? L10n.text("meta.folder") : Presentation.sizeText(item.size))
                                 + " · " + Presentation.dateText(item.modified, now: Date(), calendar: .current))
+    }
+
+    private var activePreviewURL: URL? { inlinePreview.selectedFolderFileURL ?? selectedURL }
+
+    private func openFolderPreviewFile(_ file: URL) {
+        guard allowOnlineAction() else { return }
+        if !NSWorkspace.shared.open(file) { NSSound.beep() }
     }
 
     private func previewSelected() {
@@ -2052,7 +2123,7 @@ final class SearchViewController: NSViewController, NSWindowDelegate, NSMenuDele
     func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
         (client as? NSTextField) === searchField.input ? searchField.editor : nil
     }
-    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { selectedURL != nil }
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { activePreviewURL != nil }
     override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) { quickLook.begin(panel) }
     override func endPreviewPanelControl(_ panel: QLPreviewPanel!) { quickLook.end(panel) }
 }

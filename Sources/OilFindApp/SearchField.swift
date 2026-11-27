@@ -3,6 +3,11 @@ import QuartzCore
 
 final class SearchEditor: NSTextView {
     var handleKey: ((NSEvent) -> Bool)?
+    var onPointerSelection: (() -> Void)?
+    override func mouseDown(with event: NSEvent) {
+        onPointerSelection?()
+        super.mouseDown(with: event)
+    }
     override func keyDown(with event: NSEvent) {
         if !hasMarkedText(), handleKey?(event) == true { return }
         super.keyDown(with: event)
